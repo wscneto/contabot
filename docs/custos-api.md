@@ -1,6 +1,10 @@
 # Estimativa de custo da API
 
-Preços consultados em 14/09/2026. O modelo atual do MVP é `gpt-5.5`. A API padrão cobra **US$ 5 por milhão de tokens de entrada** e **US$ 30 por milhão de tokens de saída**; entrada em cache custa US$ 0,50/milhão. Esta estimativa não aplica descontos de cache, Batch ou Flex. [Tabela oficial do modelo](https://developers.openai.com/api/docs/models/gpt-5.5).
+Preços consultados em 14/09/2026. O modelo padrão atual do MVP é `gpt-5.6-luna`. Sua API padrão cobra **US$ 0,20 por milhão de tokens de entrada** e **US$ 1,20 por milhão de tokens de saída**; entrada em cache custa US$ 0,02/milhão. O comparativo abaixo estima US$ 0,0066 por vídeo para o Luna, usando o volume de tokens do teste histórico com `gpt-5.5`; ainda é necessário medir o consumo e avaliar as contagens com o novo modelo. Esta estimativa não aplica descontos de cache, Batch ou Flex. [Tabela oficial do Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
+
+## Referência histórica com gpt-5.5
+
+O teste abaixo foi feito com `gpt-5.5`, cuja API padrão cobra US$ 5 por milhão de tokens de entrada e US$ 30 por milhão de tokens de saída; entrada em cache custa US$ 0,50/milhão. [Tabela oficial do gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5).
 
 O teste dos Minions fez duas chamadas, identificação e contagem, com cinco e dez frames respectivamente, além da referência do produto. O Codex CLI registrou 26.013 tokens de entrada e 1.156 de saída entre as duas chamadas. **Foi utilizado login ChatGPT; não houve uma chamada paga à Responses API.**
 
@@ -12,7 +16,7 @@ Aplicando as tarifas da API a esses números como aproximação:
 
 O registro do CLI também informa 604 `reasoning_output_tokens` separadamente, sem total consolidado que permita estabelecer aqui se já estão incluídos em `output_tokens`. Se forem adicionais, a projeção passa para US$ 0,182865. Na Responses API, os tokens de raciocínio já integram `output_tokens`: o campo de detalhamento não deve ser somado novamente. [Documentação de raciocínio](https://developers.openai.com/api/docs/guides/reasoning).
 
-Para planejar o piloto, a ordem de grandeza é:
+Para esse exemplo com `gpt-5.5`, a ordem de grandeza é:
 
 | Análises de vídeos semelhantes | Projeção aproximada |
 | --- | ---: |
@@ -26,15 +30,15 @@ Mais SKUs, referências, lotes de identificação e novas tentativas podem eleva
 
 O programa continua configurado para usar o Codex pela assinatura. Publicar o código não ativa cobrança na API. Para medir a API, configure `CONTABOT_PROVIDER=responses` e uma chave própria em `.env`; preserve a exportação de uso para comparar consumo, tempo e qualidade das contagens.
 
-## Comparativo com alternativas mais baratas
+## Comparativo entre os modelos
 
 Tarifas padrão consultadas em 14/09/2026, em dólares por milhão de tokens. Os links de cada modelo são as fontes oficiais dos preços e recursos.
 
 | Modelo | Entrada | Entrada em cache | Saída |
 | --- | ---: | ---: | ---: |
-| [gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5) — atual | US$ 5,00 | US$ 0,50 | US$ 30,00 |
+| [gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5) — teste histórico | US$ 5,00 | US$ 0,50 | US$ 30,00 |
 | [gpt-5.4-mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini) | US$ 0,75 | US$ 0,075 | US$ 4,50 |
-| [gpt-5.6-luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) | US$ 0,20 | US$ 0,02 | US$ 1,20 |
+| [gpt-5.6-luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) — padrão atual | US$ 0,20 | US$ 0,02 | US$ 1,20 |
 
 Para comparar somente as tarifas, a tabela abaixo mantém o mesmo consumo hipotético de **26.013 tokens de entrada e 1.156 de saída por vídeo**, somando identificação e contagem. Não acrescenta os 604 tokens de raciocínio mencionados acima; por isso apresenta valores pontuais, enquanto a projeção anterior considera essa incerteza do registro do CLI. Os valores são arredondados depois de calcular cada volume de vídeos.
 
@@ -48,14 +52,14 @@ São projeções calculadas, **não custos medidos nesses modelos pela API**. O 
 
 Os três modelos aceitam imagens e respostas estruturadas pela Responses API, conforme suas documentações. O sistema envia os frames extraídos pelo OpenCV e as referências dos SKUs; esses modelos não recebem o arquivo de vídeo diretamente. Esse suporte permite testar o fluxo, mas não comprova precisão na identificação das variantes ou na contagem das unidades.
 
-A sugestão para o piloto é começar pelo `gpt-5.4-mini` e comparar também o `gpt-5.6-luna` com contagens físicas verificadas. Registre o consumo real das duas etapas, as contagens corretas, os erros sem pedido de revisão e o tempo de correção humana. Uma tarifa menor só será vantajosa se a qualidade e o tempo total forem adequados ao trabalho da loja.
+O modelo escolhido para o piloto é o `gpt-5.6-luna`. Avalie suas contagens com contagens físicas verificadas e, se necessário, compare com `gpt-5.4-mini` e `gpt-5.5` usando os mesmos vídeos. Registre o consumo real das duas etapas, as contagens corretas, os erros sem pedido de revisão e o tempo de correção humana. Uma tarifa menor só será vantajosa se a qualidade e o tempo total forem adequados ao trabalho da loja.
 
-Para experimentar o mini, ajuste o arquivo local `.env` e reinicie o servidor:
+Para experimentar o Luna pela API, ajuste o arquivo local `.env` e reinicie o servidor:
 
 ```dotenv
 CONTABOT_PROVIDER=responses
-CONTABOT_MODEL=gpt-5.4-mini
+CONTABOT_MODEL=gpt-5.6-luna
 OPENAI_API_KEY=sua-chave-da-api
 ```
 
-Para comparar com o Luna, use `CONTABOT_MODEL=gpt-5.6-luna`. Essa configuração utiliza a cobrança separada da API, com uma chave própria; a assinatura do ChatGPT não cobre essas chamadas. As duas etapas usam o modelo configurado, sem alternância automática entre modelos. A atualização deste documento não altera a configuração do aplicativo.
+Para comparar com o mini, use `CONTABOT_MODEL=gpt-5.4-mini`. Essa configuração utiliza a cobrança separada da API, com uma chave própria; a assinatura do ChatGPT não cobre essas chamadas. As duas etapas usam o modelo configurado, sem alternância automática entre modelos. Um `CONTABOT_MODEL` já definido no ambiente ou no `.env` prevalece sobre o padrão do aplicativo.

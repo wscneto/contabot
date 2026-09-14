@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 class Settings:
     data_dir: Path = Path("data")
     provider: str = "codex"
-    model: str = "gpt-5.5"
+    model: str = "gpt-5.6-luna"
     codex_command: str = "codex"
     endpoint: str = "https://api.openai.com/v1/responses"
     api_key: str = field(default="", repr=False)

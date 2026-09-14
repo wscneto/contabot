@@ -15,7 +15,9 @@ uv run uvicorn contabot.app:create_app --factory --host 127.0.0.1 --port 8000
 
 No login, escolha sua conta ChatGPT. Se já estiver conectado, basta verificar com `codex login status`. Abra **http://127.0.0.1:8000**. O `uv` gerencia o ambiente automaticamente; não é necessário ativar um ambiente manualmente.
 
-A configuração padrão usa **Codex com login ChatGPT**, modelo **`gpt-5.5`**, que aceita imagens. O modelo pode ser trocado em `CONTABOT_MODEL` por outro com entrada de imagens disponível na sua conta. O processamento usa o acesso da assinatura pelo CLI e seus limites; não transforma a assinatura em créditos de API. A aplicação não lê tokens e recusa login por chave API nesse modo. Consulte [autenticação oficial](https://learn.chatgpt.com/docs/auth) e [execução não interativa](https://learn.chatgpt.com/docs/non-interactive-mode).
+A configuração padrão usa **Codex com login ChatGPT**, modelo **`gpt-5.6-luna`**, que aceita imagens. O modelo pode ser trocado em `CONTABOT_MODEL` por outro com entrada de imagens disponível na sua conta. O processamento usa o acesso da assinatura pelo CLI e seus limites; não transforma a assinatura em créditos de API. A aplicação não lê tokens e recusa login por chave API nesse modo. Consulte [autenticação oficial](https://learn.chatgpt.com/docs/auth) e [execução não interativa](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+O arquivo `.env` é opcional: sem configurações no arquivo ou no terminal, o programa usa os valores padrão acima. `.env.example` serve como modelo e não é carregado pelo aplicativo. Para alterar o modelo, edite `.env` ou defina `CONTABOT_MODEL` no terminal e reinicie o servidor; uma configuração explícita prevalece sobre o padrão do código.
 
 Para acesso pelo celular na mesma rede, substitua o host por `0.0.0.0` e abra `http://IP-DO-COMPUTADOR:8000`. Use somente uma instância, em máquina/rede privada: o protótipo não tem autenticação, e o processamento usa o login do computador. Vídeos, catálogo, sugestões e correções ficam em `data/`; preserve essa pasta para manter as evidências. `.env` e `data/` não entram no Git.
 
