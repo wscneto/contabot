@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#642735">
+  <title>ContaBot · Contar produtos</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="#count"><span aria-hidden="true">▥</span> ContaBot</a>
+    <nav aria-label="Navegação principal">
+      <a href="#count" data-nav="count">Contar produtos</a>
+      <a href="#catalog" data-nav="catalog">Meus produtos</a>
+    </nav>
+    <small id="provider-label"></small>
+  </header>
+  <main>
+    <div id="simulation-banner" class="notice simulation" hidden><strong>Modo simulado.</strong> Os resultados são fictícios e servem apenas para testar o fluxo.</div>
+    <div id="app"><p class="empty" role="status">Carregando…</p></div>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
