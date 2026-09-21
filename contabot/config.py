@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from urllib.parse import urlparse
+
 from dotenv import load_dotenv
 
 
@@ -24,14 +26,19 @@ class Settings:
     max_upload_mb: int = 200
     api_timeout: float = 180
     max_output_tokens: int = 4000
+    response_format: str = "json_schema"
+    image_max_dimension: int = 1920
     provider_parameters: dict = field(default_factory=dict)
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir).resolve()
-        if self.provider not in {"codex", "mock", "responses"}:
-            raise ValueError("CONTABOT_PROVIDER deve ser codex, mock ou responses.")
+        if self.provider not in {"codex", "mock", "responses", "chat"}:
+            raise ValueError("CONTABOT_PROVIDER deve ser codex, mock, responses ou chat.")
+        if self.response_format not in {"json_schema", "json_object", "none"}:
+            raise ValueError("CONTABOT_RESPONSE_FORMAT deve ser json_schema, json_object ou none.")
         for name in ("max_images", "max_frames", "max_count_frames", "sample_hz", "max_candidates",
-                     "max_duration_seconds", "max_upload_mb", "api_timeout", "max_output_tokens"):
+                     "max_duration_seconds", "max_upload_mb", "api_timeout", "max_output_tokens",
+                     "image_max_dimension"):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"Configuração {name} deve ser positiva e finita.")
         if self.max_images < 2 or self.max_frames > self.max_candidates:
@@ -46,8 +53,18 @@ class Settings:
         load_dotenv()
         defaults = cls()
         values = {}
+        endpoint_val = os.getenv("CONTABOT_ENDPOINT", str(defaults.endpoint))
+        endpoint_host = urlparse(endpoint_val).hostname or ""
         for name in cls.__dataclass_fields__:
-            value = os.getenv("OPENAI_API_KEY" if name == "api_key" else "CONTABOT_" + name.upper())
+            if name == "api_key":
+                # Cada chave só vai para o seu fornecedor: OPENAI_API_KEY para a OpenAI,
+                # CONTABOT_API_KEY para os demais endpoints.
+                if endpoint_host == "api.openai.com":
+                    value = os.getenv("OPENAI_API_KEY") or os.getenv("CONTABOT_API_KEY") or ""
+                else:
+                    value = os.getenv("CONTABOT_API_KEY") or ""
+            else:
+                value = os.getenv("CONTABOT_" + name.upper())
             if value is not None:
                 default = getattr(defaults, name)
                 values[name] = json.loads(value) if name == "provider_parameters" else type(default)(value)

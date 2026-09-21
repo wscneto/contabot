@@ -13,15 +13,18 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 
 import httpx
+from PIL import Image, ImageOps
 
 from .domain import CountResult, Identification, validate_count, validate_identification
 
@@ -178,6 +181,32 @@ def _validate(stage: Stage, payload: Any, video: dict, catalog: list[dict], fram
 
 def _schema(stage: Stage) -> dict:
     return (Identification if stage == "identify" else CountResult).model_json_schema()
+
+
+def _clean_schema(schema: dict) -> dict:
+    cloned = json.loads(json.dumps(schema))
+    defs = cloned.pop("$defs", {})
+
+    def resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_name = node["$ref"].split("/")[-1]
+                target = json.loads(json.dumps(defs.get(ref_name, {})))
+                return resolve(target)
+            res = {}
+            for k, v in node.items():
+                if k in {"title", "minimum"}:
+                    continue
+                if k == "properties" and isinstance(v, dict):
+                    res["properties"] = {prop_name: resolve(prop_val) for prop_name, prop_val in v.items()}
+                else:
+                    res[k] = resolve(v)
+            return res
+        elif isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(cloned)
 
 
 class MockProvider:
@@ -401,6 +430,156 @@ class ResponsesProvider:
         return ProviderResult(prediction, usage, str(data.get("model") or self.model), False, request_id)
 
 
+@dataclass
+class ChatCompletionsProvider:
+    model: str
+    endpoint: str
+    api_key: str = field(repr=False)
+    max_images: int = 16
+    timeout: float = 180
+    max_output_tokens: int = 4000
+    response_format: str = "json_schema"
+    image_max_dimension: int = 1920
+    extra_parameters: dict[str, Any] = field(default_factory=dict)
+    transport: httpx.BaseTransport | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        parsed = urlparse(self.endpoint)
+        if not self.model.strip() or parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise ProviderError("Configure modelo e endpoint HTTP(S) sem credenciais embutidas.")
+        if type(self.max_images) is not int or self.max_images < 1:
+            raise ProviderError("O limite de imagens precisa ser um inteiro positivo.")
+        if type(self.image_max_dimension) is not int or self.image_max_dimension < 1:
+            raise ProviderError("A dimensão máxima de imagem precisa ser um inteiro positivo.")
+        if self.response_format not in {"json_schema", "json_object", "none"}:
+            raise ProviderError("CONTABOT_RESPONSE_FORMAT deve ser json_schema, json_object ou none.")
+        protected = {"model", "messages", "response_format", "max_tokens", "max_completion_tokens", "stream", "n"}
+        if protected.intersection(self.extra_parameters):
+            raise ProviderError("Parâmetros extras não podem substituir imagens, modelo, esquema ou controles da requisição.")
+        if parsed.hostname == "api.openai.com" and not self.api_key.strip():
+            raise ProviderError("Credencial ausente. A API requer chave própria; configure CONTABOT_API_KEY ou OPENAI_API_KEY no .env.")
+        if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "api.openai.com"} and not self.api_key.strip():
+            raise ProviderError("Credencial ausente. Configure CONTABOT_API_KEY no .env.")
+
+    def _image(self, path: str) -> dict[str, Any]:
+        file = Path(path)
+        try:
+            with Image.open(file) as img:
+                img = ImageOps.exif_transpose(img)
+                max_dim = max(img.width, img.height)
+                if max_dim > self.image_max_dimension:
+                    img.thumbnail((self.image_max_dimension, self.image_max_dimension), Image.Resampling.LANCZOS)
+                    buffer = BytesIO()
+                    img.convert("RGB").save(buffer, format="JPEG", quality=92)
+                    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+                    mime = "image/jpeg"
+                else:
+                    mime = mimetypes.guess_type(file.name)[0] or "image/jpeg"
+                    encoded = base64.b64encode(file.read_bytes()).decode("ascii")
+                return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}", "detail": "high"}}
+        except (OSError, Image.DecompressionBombError) as error:
+            raise ProviderError("Não foi possível ler uma imagem do vídeo ou do catálogo.") from error
+
+    def identify(self, video: dict, catalog: list[dict], frames: list[dict]) -> ProviderResult:
+        return self._infer("identify", video, catalog, frames)
+
+    def count(self, video: dict, catalog: list[dict], frames: list[dict]) -> ProviderResult:
+        return self._infer("count", video, catalog, frames)
+
+    def _infer(self, stage: Stage, video: dict, catalog: list[dict], frames: list[dict]) -> ProviderResult:
+        metadata, images = _prepare(video, catalog, frames, self.max_images)
+        instructions = IDENTIFICATION_INSTRUCTIONS if stage == "identify" else COUNTING_INSTRUCTIONS
+        clean_schema = _clean_schema(_schema(stage))
+        # O esquema vai sempre no texto: nem todo intermediário faz o modelo cumprir response_format.
+        instructions += f"\n\nResponda exclusivamente com um JSON válido correspondente ao esquema:\n{json.dumps(clean_schema, ensure_ascii=False)}"
+        user_content: list[dict] = [{"type": "text", "text": json.dumps(metadata, ensure_ascii=False)}]
+        for label, path in images:
+            user_content.extend([{"type": "text", "text": label}, self._image(path)])
+        messages = [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_content},
+        ]
+        body: dict[str, Any] = {
+            **self.extra_parameters,
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_output_tokens,
+        }
+        if self.response_format == "json_schema":
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": stage, "strict": True, "schema": clean_schema},
+            }
+        elif self.response_format == "json_object":
+            body["response_format"] = {"type": "json_object"}
+
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key.strip() else {}
+        try:
+            with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
+                response = client.post(self.endpoint, headers=headers, json=body)
+        except httpx.HTTPError as error:
+            raise ProviderError("Falha de conexão com o provedor visual; tente novamente.") from error
+
+        request_id = response.headers.get("x-request-id")
+        if response.status_code == 413:
+            raise ProviderError(
+                "A requisição excedeu o tamanho máximo aceito pelo provedor (HTTP 413). Reduza CONTABOT_IMAGE_MAX_DIMENSION ou CONTABOT_MAX_IMAGES.",
+                request_id=request_id,
+            )
+        try:
+            data = response.json()
+        except ValueError as error:
+            raise ProviderError("O provedor retornou conteúdo que não é JSON.", request_id=request_id) from error
+        if not isinstance(data, dict):
+            raise ProviderError("O provedor retornou um envelope inválido.", request_id=request_id)
+
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        request_id = request_id or data.get("id")
+
+        def fail(message: str) -> None:
+            raise ProviderError(message, usage=usage, request_id=request_id)
+
+        if not response.is_success or data.get("error"):
+            fail(f"A API recusou a requisição (HTTP {response.status_code}); confira configuração e limites.")
+
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            fail("A API não retornou escolhas de resposta válidas.")
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            fail("A API retornou escolha malformada.")
+
+        finish_reason = choice.get("finish_reason")
+        if finish_reason == "length":
+            fail("A resposta do modelo foi truncada por exceder o limite de tokens.")
+        if finish_reason in {"content_filter", "refusal"}:
+            fail("O modelo recusou a análise por filtro de conteúdo.")
+
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            fail("A mensagem do modelo está malformada.")
+        if message.get("refusal"):
+            fail("O modelo recusou a análise.")
+
+        content_text = message.get("content")
+        if not isinstance(content_text, str) or not content_text.strip():
+            fail("O modelo retornou texto vazio ou inválido.")
+
+        cleaned = re.sub(r"<think>.*?</think>", "", content_text, flags=re.DOTALL).strip()
+        try:
+            payload = json.loads(cleaned)
+        except ValueError:
+            fences_removed = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+            fences_removed = re.sub(r"\s*```$", "", fences_removed).strip()
+            try:
+                payload = json.loads(fences_removed)
+            except ValueError:
+                fail("O modelo retornou JSON inválido.")
+
+        prediction = _validate(stage, payload, video, catalog, frames, usage, request_id)
+        return ProviderResult(prediction, usage, str(data.get("model") or self.model), False, request_id)
+
+
 def make_provider(settings: Any) -> VisionProvider:
     if settings.provider == "mock":
         return MockProvider()
@@ -409,4 +588,15 @@ def make_provider(settings: Any) -> VisionProvider:
     if settings.provider == "responses":
         return ResponsesProvider(settings.model, settings.endpoint, settings.api_key, max_images=settings.max_images,
                                  timeout=settings.api_timeout, max_output_tokens=settings.max_output_tokens, extra_parameters=settings.provider_parameters)
-    raise ProviderError("Provedor desconhecido. Use codex, responses ou mock.")
+    if settings.provider == "chat":
+        if settings.endpoint == "https://api.openai.com/v1/responses":
+            raise ProviderError("Para o provedor chat, configure CONTABOT_ENDPOINT com a URL completa do endpoint (ex.: https://api.deepinfra.com/v1/openai/chat/completions).")
+        return ChatCompletionsProvider(
+            settings.model, settings.endpoint, settings.api_key,
+            max_images=settings.max_images, timeout=settings.api_timeout,
+            max_output_tokens=settings.max_output_tokens,
+            response_format=settings.response_format,
+            image_max_dimension=settings.image_max_dimension,
+            extra_parameters=settings.provider_parameters,
+        )
+    raise ProviderError("Provedor desconhecido. Use codex, responses, chat ou mock.")

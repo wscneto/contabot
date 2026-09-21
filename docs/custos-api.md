@@ -63,3 +63,15 @@ OPENAI_API_KEY=sua-chave-da-api
 ```
 
 Para comparar com o mini, use `CONTABOT_MODEL=gpt-5.4-mini`. Essa configuração utiliza a cobrança separada da API, com uma chave própria; a assinatura do ChatGPT não cobre essas chamadas. As duas etapas usam o modelo configurado, sem alternância automática entre modelos. Um `CONTABOT_MODEL` já definido no ambiente ou no `.env` prevalece sobre o padrão do aplicativo.
+
+## Medição de custos por modelo via intermediários (Adaptador `chat`)
+
+O adaptador `CONTABOT_PROVIDER=chat` permite testar modelos de visão em intermediários (DeepInfra, OpenRouter, Together AI, vLLM local). O consumo real de tokens (`prompt_tokens` e `completion_tokens`) de cada tentativa é registrado no JSON de exportação (`/api/videos/{id}/export`).
+
+| Fornecedor | Modelo | Entrada (US$/1M) | Saída (US$/1M) | Tokens médios/vídeo (medido) | Custo medido/vídeo | Data da consulta |
+| :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| *OpenAI* | `gpt-5.6-luna` | US$ 0,20 | US$ 1,20 | *aguardando piloto* | — | 14/09/2026 |
+| *DeepInfra* | *(a definir)* | — | — | *aguardando piloto* | — | — |
+| *OpenRouter* | *(a definir)* | — | — | *aguardando piloto* | — | 21/09/2026 |
+
+Ao comparar modelos, anote na tabela os tokens devolvidos pelo provedor e verifique se o modelo requer redução de resolução (`CONTABOT_IMAGE_MAX_DIMENSION=1024` ou `768`) para viabilizar o envio dentro dos limites de payload e orçamento de tokens.

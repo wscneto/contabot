@@ -28,6 +28,11 @@ class Correction(BaseModel):
     counts: dict[str, StrictInt | None]
 
 
+class Retry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sku_ids: list[str] | None = None
+
+
 def create_app(settings: Settings | None = None):
     settings = settings or Settings.from_env()
     store = Store(settings.data_dir)
@@ -68,6 +73,19 @@ def create_app(settings: Settings | None = None):
                     result[key] = public(item)
             return result
         return value
+
+    def choose_catalog(sku_ids, message):
+        # Sem seleção, procura todos os produtos, como antes.
+        catalog = store.all("skus")
+        if not catalog:
+            raise HTTPException(422, message)
+        if not sku_ids:
+            return catalog
+        wanted = set(sku_ids)
+        chosen = [sku for sku in catalog if sku["id"] in wanted]
+        if len(chosen) != len(wanted):
+            raise HTTPException(422, "Um dos produtos escolhidos não está mais cadastrado. Atualize a página.")
+        return chosen
 
     def get_video(identifier):
         record = store.get("videos", identifier)
@@ -295,10 +313,9 @@ def create_app(settings: Settings | None = None):
         return [{k:v[k] for k in ("id","filename","status","created_at","simulated")} for v in store.all("videos")]
 
     @app.post("/api/videos", status_code=202)
-    def add_video(background_tasks: BackgroundTasks, video: UploadFile = File(...), synthetic: bool = Form(False)):
-        catalog = store.all("skus")
-        if not catalog:
-            raise HTTPException(422, "Cadastre um produto com foto antes de enviar o vídeo.")
+    def add_video(background_tasks: BackgroundTasks, video: UploadFile = File(...), synthetic: bool = Form(False),
+                  sku_ids: list[str] | None = Form(None)):
+        catalog = choose_catalog(sku_ids, "Cadastre um produto com foto antes de enviar o vídeo.")
         filename = Path(video.filename or "video.mp4").name
         suffix = Path(filename).suffix.lower()
         if suffix not in {".mp4", ".mov", ".m4v", ".avi", ".webm", ".mkv"}:
@@ -325,17 +342,19 @@ def create_app(settings: Settings | None = None):
         return public(get_video(identifier))
 
     @app.post("/api/videos/{identifier}/retry", status_code=202)
-    def retry(identifier: str, background_tasks: BackgroundTasks):
+    def retry(identifier: str, background_tasks: BackgroundTasks, body: Retry | None = None):
         with mutation_lock:
             record = get_video(identifier)
             if record["status"] == "processing":
                 raise HTTPException(409, "Este vídeo ainda está sendo analisado.")
-            catalog = store.all("skus")
-            if not catalog:
-                raise HTTPException(422, "Cadastre um produto com foto antes de analisar novamente.")
+            catalog = choose_catalog(body.sku_ids if body else None, "Cadastre um produto com foto antes de analisar novamente.")
+            if ((record.get("video_metadata") or {}).get("criteria") or {}).get("max_frames") != settings.max_frames:
+                # Limite de frames mudou: escolher as imagens de novo a partir do vídeo original.
+                record.update(candidate_frames=None, identification_frame_ids=[], frames=[])
             record.update(status="processing",stage="identifying" if record["frames"] else "frames",error=None,
                 prediction=None,identification=None,results=[],unknown_products=[],confirmed_counts=None,
-                catalog=catalog)
+                catalog=catalog,simulated=record.get("synthetic", False) or settings.provider=="mock",
+                model=settings.model)
             response = save(record)
             background_tasks.add_task(process,identifier)
             return response

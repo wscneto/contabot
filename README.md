@@ -36,7 +36,8 @@ Escolha o modo no `.env` antes de iniciar o servidor:
 | --- | --- | --- |
 | Simulação | `CONTABOT_PROVIDER=mock` | Nenhuma conta; os números são fictícios. |
 | ChatGPT próprio | `CONTABOT_PROVIDER=codex` | Instale o Codex CLI e execute `codex login` com sua própria conta, com acesso ao modelo escolhido. |
-| API própria | `CONTABOT_PROVIDER=responses` | Preencha `OPENAI_API_KEY` com sua chave local; cobrança separada da assinatura ChatGPT. |
+| Intermediários / API | `CONTABOT_PROVIDER=chat` | Use DeepInfra, OpenRouter, Together, Hugging Face ou vLLM local via `/v1/chat/completions`. |
+| API Responses | `CONTABOT_PROVIDER=responses` | Preencha `OPENAI_API_KEY` com sua chave local; cobrança separada da assinatura ChatGPT. |
 
 ```bash
 uv run uvicorn contabot.app:create_app --factory --port 8000
@@ -49,10 +50,10 @@ No PowerShell, use `Copy-Item .env.example .env` no lugar de `cp`; os comandos `
 ## Usar
 
 1. Em **Meus produtos**, informe o nome e envie de uma a quatro fotos legíveis da embalagem. Inclua a variante no nome quando houver produtos parecidos e use fotos da versão exata.
-2. Em **Contar produtos**, escolha o vídeo e clique para contar. Não precisa selecionar SKUs, preencher dados de pessoas ou descrever prateleiras.
+2. Em **Contar produtos**, escolha o vídeo e clique para contar. Todos os produtos vêm marcados em **Produtos a contar**; desmarque os que não aparecem no vídeo para uma análise mais rápida e barata. Não precisa preencher dados de pessoas ou descrever prateleiras.
 3. Aguarde a identificação e a contagem. Confira as sugestões e, se necessário, corrija as quantidades. A sugestão original continua preservada. As imagens ficam disponíveis em **Ver imagens**.
 
-Para corrigir nome ou referência, use **Editar** no produto. Fotos novas substituem as referências atuais; sem novas fotos, as anteriores são mantidas. **Tentar novamente** analisa o mesmo vídeo usando o catálogo atualizado.
+Para corrigir nome ou referência, use **Editar** no produto. Fotos novas substituem as referências atuais; sem novas fotos, as anteriores são mantidas. **Tentar novamente** analisa o mesmo vídeo usando o catálogo atualizado; em **Escolher produtos para “Tentar novamente”** dá para limitar a nova análise a alguns produtos. A nova análise substitui o resultado anterior do vídeo.
 
 Para remover um produto, clique em **Excluir** ao lado dele e confirme. O produto deixa de participar de novas análises; fotos e resultados anteriores são preservados. Se excluir todos os produtos, cadastre outro antes de enviar ou reanalisar um vídeo.
 
@@ -114,3 +115,7 @@ A seleção de frames combina qualidade e distribuição temporal, registra niti
 As respostas passam por um esquema estrito, mas JSON válido não prova reconhecimento correto. O modelo pode confundir variantes e errar a contagem. Produtos desconhecidos não devem ser forçados ao catálogo. Falhas deixam o vídeo disponível para nova tentativa, sem repetição automática de chamadas. Reiniciar o servidor interrompe trabalhos em andamento; não há fila durável ou suporte a múltiplos processos.
 
 A versão simplificada mantém os SKUs existentes e não apaga tabelas da versão anterior. As antigas telas de sessões/seções foram retiradas. ERP, sensores e treinamento próprio permanecem fora do MVP.
+
+## Privacidade e Provedores Externos
+
+Ao utilizar `CONTABOT_PROVIDER=chat` com intermediários (DeepInfra, OpenRouter, Together AI) ou APIs de terceiros, os frames extraídos do vídeo e as fotos de referência do catálogo são transmitidos ao fornecedor configurado. Antes de rodar testes com dados confidenciais ou em produção, verifique a política de retenção de dados, logs e uso para treinamento do provedor e dos intermediários envolvidos.

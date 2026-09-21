@@ -198,6 +198,77 @@ def test_failure_is_safe_retains_usage_and_can_retry(client, demo):
     assert len(recovered["attempts"]) >= 4
 
 
+def test_retry_with_real_provider_clears_earlier_simulated_flag(tmp_path, demo):
+    settings = Settings(data_dir=tmp_path, provider="responses", endpoint="http://127.0.0.1:9/v1/responses", max_frames=3)
+    with TestClient(create_app(settings)) as client:
+        catalog(client)
+        client.app.state.provider = FakeProvider()  # returns simulated=True, like an earlier mock run
+        response = client.post("/api/videos", files={"video": ("capture.mp4", (demo / "prateleira_simulada.mp4").read_bytes(), "video/mp4")})
+        identifier = response.json()["id"]
+        assert client.get(f"/api/videos/{identifier}").json()["simulated"] is True
+
+        class Real(FakeProvider):
+            def identify(self, *args):
+                return ProviderResult(**{**vars(super().identify(*args)), "simulated": False})
+
+            def count(self, *args):
+                return ProviderResult(**{**vars(super().count(*args)), "simulated": False})
+
+        client.app.state.provider = Real()
+        assert client.post(f"/api/videos/{identifier}/retry").status_code == 202
+        retried = client.get(f"/api/videos/{identifier}").json()
+        assert retried["prediction"] is not None
+        assert retried["simulated"] is False
+        assert client.get("/api/videos").json()[0]["simulated"] is False
+
+
+def test_upload_and_retry_can_limit_products(client, demo):
+    catalog(client)
+    provider = FakeProvider()
+    client.app.state.provider = provider
+    response = client.post("/api/videos", data={"synthetic": "true", "sku_ids": ["B"]},
+                           files={"video": ("capture.mp4", (demo / "prateleira_simulada.mp4").read_bytes(), "video/mp4")})
+    assert response.status_code == 202, response.text
+    video = client.get(f"/api/videos/{response.json()['id']}").json()
+    assert [sku["id"] for sku in video["catalog"]] == ["B"]
+    assert provider.calls[0][1] == ["B"]
+    assert [row["sku_id"] for row in video["results"]] == ["B"]
+
+    provider.calls.clear()
+    assert client.post(f"/api/videos/{video['id']}/retry", json={"sku_ids": ["A"]}).status_code == 202
+    assert provider.calls[0][1] == ["A"]
+    assert [row["sku_id"] for row in client.get(f"/api/videos/{video['id']}").json()["results"]] == ["A"]
+
+    provider.calls.clear()
+    assert client.post(f"/api/videos/{video['id']}/retry").status_code == 202
+    assert set(provider.calls[0][1]) == {"A", "B"}
+
+
+def test_unknown_selected_product_is_rejected_without_touching_video(client, demo):
+    catalog(client)
+    client.app.state.provider = FakeProvider()
+    video = upload(client, demo)
+    assert client.post(f"/api/videos/{video['id']}/retry", json={"sku_ids": ["A", "REMOVIDO"]}).status_code == 422
+    assert client.post(f"/api/videos/{video['id']}/retry", json={"sku_ids": ["A"], "extra": 1}).status_code == 422
+    assert client.get(f"/api/videos/{video['id']}").json()["prediction"] == video["prediction"]
+    response = client.post("/api/videos", data={"sku_ids": ["REMOVIDO"]},
+                           files={"video": ("capture.mp4", (demo / "prateleira_simulada.mp4").read_bytes(), "video/mp4")})
+    assert response.status_code == 422
+    assert len(client.get("/api/videos").json()) == 1
+
+
+def test_retry_reselects_frames_when_frame_limit_changes(client, demo):
+    catalog(client)
+    client.app.state.provider = FakeProvider()
+    video = upload(client, demo)
+    assert video["video_metadata"]["criteria"]["max_frames"] == 3
+    client.app.state.settings.max_frames = 4
+    assert client.post(f"/api/videos/{video['id']}/retry").status_code == 202
+    retried = client.get(f"/api/videos/{video['id']}").json()
+    assert retried["video_metadata"]["criteria"]["max_frames"] == 4
+    assert retried["prediction"] is not None
+
+
 def test_catalog_is_snapshotted_and_videos_have_no_cross_video_total(client, demo):
     catalog(client)
     client.app.state.provider = FakeProvider()
@@ -399,7 +470,7 @@ def test_count_uses_neighbor_angle_and_retains_positive_partial_result(tmp_path,
     def extract(*args, **kwargs):
         extractions.append(1)
         return {"candidates": deepcopy(candidates), "selected_frame_ids": ["front", "context"],
-                "primary_frame_id": "front", "duration_seconds": 13, "criteria": {}}
+                "primary_frame_id": "front", "duration_seconds": 13, "criteria": {"max_frames": kwargs["max_frames"]}}
     monkeypatch.setattr("contabot.app.extract_frames", extract)
 
     class SideCounter(FakeProvider):

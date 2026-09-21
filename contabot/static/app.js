@@ -9,6 +9,13 @@ const statusText = {processing:'Processando', completed:'Contagem sugerida', nee
 const dateLabel = value => new Date(value).toLocaleString('pt-BR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
 const badge = status => `<span class="badge ${esc(status)}">${esc(statusText[status] || status)}</span>`;
 
+const skuPicker = (id, legend) => `<fieldset class="sku-picker" id="${id}"><legend>${legend}</legend><div class="sku-options">${state.skus.map(s => `<label><input type="checkbox" name="sku_ids" value="${esc(s.id)}" checked><span>${esc(s.name)}${s.variant ? ` · ${esc(s.variant)}` : ''}</span></label>`).join('')}</div><small>Desmarque os produtos que não precisam ser contados. Menos produtos deixam a análise mais rápida e barata.</small></fieldset>`;
+const pickedSkus = picker => {
+  const ids = $$('input[name=sku_ids]:checked', picker).map(input => input.value);
+  if (!ids.length) throw new Error('Escolha ao menos um produto para contar.');
+  return ids;
+};
+
 async function api(path, options = {}) {
   if (options.body && !(options.body instanceof FormData)) { options.headers = {'Content-Type':'application/json'}; options.body = JSON.stringify(options.body); }
   let response;
@@ -23,7 +30,7 @@ function toast(message, error = false) {
 }
 function renderCount() {
   return `<h1>Conte seus produtos pelo vídeo.</h1><p class="lead">Envie uma filmagem. O ContaBot reconhece os produtos cadastrados e sugere as quantidades.</p>
-    <section class="panel">${state.skus.length ? `<form id="video-form"><label class="field upload-field">Escolha um vídeo<input name="video" type="file" accept="video/*,.mov,.mkv" required><small>Vídeo do celular · até ${esc(state.config.max_upload_mb)} MB</small></label><p class="capture-help">Filme uma área curta, devagar, com todas as caixas visíveis. Evite voltar sobre o mesmo trecho.</p><div class="actions"><button class="btn" type="submit">Contar produtos <span aria-hidden="true">→</span></button></div><div class="form-error" role="alert"></div></form>` : '<div class="empty"><p>Primeiro, adicione fotos dos produtos que deseja reconhecer.</p><a class="btn" href="#catalog">Cadastrar produtos →</a></div>'}</section>
+    <section class="panel">${state.skus.length ? `<form id="video-form"><label class="field upload-field">Escolha um vídeo<input name="video" type="file" accept="video/*,.mov,.mkv" required><small>Vídeo do celular · até ${esc(state.config.max_upload_mb)} MB</small></label>${skuPicker('upload-skus', 'Produtos a contar')}<p class="capture-help">Filme uma área curta, devagar, com todas as caixas visíveis. Evite voltar sobre o mesmo trecho.</p><div class="actions"><button class="btn" type="submit">Contar produtos <span aria-hidden="true">→</span></button></div><div class="form-error" role="alert"></div></form>` : '<div class="empty"><p>Primeiro, adicione fotos dos produtos que deseja reconhecer.</p><a class="btn" href="#catalog">Cadastrar produtos →</a></div>'}</section>
     <div class="section-heading"><h2>Seus vídeos</h2></div><div class="video-list">${state.videos.length ? state.videos.map(v => `<a class="video-card" href="#video/${encodeURIComponent(v.id)}"><span><span class="video-name">${esc(v.filename)}</span><small>${esc(dateLabel(v.created_at))}${v.simulated ? ' · Simulado' : ''}</small></span>${badge(v.status)}</a>`).join('') : '<p class="empty">Os resultados aparecem aqui depois do primeiro vídeo.</p>'}</div>`;
 }
 function renderCatalog() {
@@ -57,6 +64,7 @@ function renderVideo() {
     ${v.simulated && !state.config.simulated ? '<div class="notice simulation"><strong>Resultado simulado.</strong> Estas quantidades são fictícias.</div>' : ''}
     <section class="panel">${v.status === 'processing' ? `<div class="processing" role="status"><span class="spinner" aria-hidden="true"></span><div><strong>${stage}</strong><small>Você pode continuar usando o ContaBot.</small></div></div>` : v.status === 'failed' ? `<div class="notice danger" role="alert">${esc(v.error || 'Não foi possível analisar este vídeo. Tente novamente ou envie outra filmagem.')}</div><button class="btn secondary" id="retry-button">Tentar novamente</button>` : v.status === 'no_matches' ? `<h2>Nenhum produto cadastrado foi identificado</h2><p class="muted">Isso não significa que a quantidade seja zero. Confira as fotos dos produtos ou tente um vídeo mais nítido.</p>${noMatchReasons ? `<p class="result-note">${esc(noMatchReasons)}</p>` : ''}<div class="actions"><a class="btn" href="#count">Enviar outro vídeo</a><a href="#catalog">Ver meus produtos</a><button class="btn secondary" id="retry-button">Tentar novamente</button></div>` : `<form id="counts-form">${v.status === 'needs_review' ? `<div class="notice">${reviewNotice}</div>` : ''}<div class="results">${(v.results || []).map(resultRow).join('')}</div>${(v.results || []).length ? '<div class="actions"><button class="btn secondary" type="submit">Salvar correções</button><button class="text-button" id="retry-button" type="button">Tentar novamente</button><a href="#count" class="muted">Contar outro vídeo →</a></div><p class="result-help">Preencha só as quantidades que você conferiu.</p><div class="form-error" role="alert"></div>' : '<p class="empty">Nenhuma contagem disponível para este vídeo.</p>'}</form>`}
     ${v.unknown_products?.length ? `<p class="result-note">Outros produtos não identificados: ${v.unknown_products.map(esc).join('; ')}.</p>` : ''}
+    ${v.status !== 'processing' && state.skus.length ? `<details class="evidence retry-options"><summary>Escolher produtos para “Tentar novamente”</summary>${skuPicker('retry-skus', 'Produtos da nova análise')}</details>` : ''}
     ${shownFrames.length && v.status !== 'processing' ? `<details class="evidence"><summary>Ver imagens</summary><div class="frames">${shownFrames.map(f => `<a href="${media(f.url)}" target="_blank" rel="noopener"><img src="${media(f.url)}" alt="Imagem usada na contagem, aos ${Number(f.timestamp_seconds || 0).toFixed(1)} segundos" loading="lazy">${Number(f.timestamp_seconds || 0).toFixed(1).replace('.', ',')} s</a>`).join('')}</div></details>` : ''}</section>`;
 }
 function render(view) {
@@ -79,9 +87,9 @@ async function route() {
   const hash = location.hash.slice(1) || 'count';
   try {
     if (hash.startsWith('video/')) {
-      const video = await api(`/api/videos/${encodeURIComponent(decodeURIComponent(hash.slice(6)))}`);
+      const [video, skus] = await Promise.all([api(`/api/videos/${encodeURIComponent(decodeURIComponent(hash.slice(6)))}`), api('/api/skus')]);
       if (current !== state.route) return;
-      state.video = video; render('video'); if (video.status === 'processing') pollVideo(video.id, current);
+      state.video = video; state.skus = skus; render('video'); if (video.status === 'processing') pollVideo(video.id, current);
     } else {
       const [skus, videos] = await Promise.all([api('/api/skus'), api('/api/videos')]);
       if (current !== state.route) return;
@@ -113,6 +121,7 @@ document.addEventListener('submit', event => {
     const current = state.route;
     const file = form.elements.namedItem('video').files[0];
     if (file.size > state.config.max_upload_mb * 1024 * 1024) throw new Error(`O vídeo deve ter até ${state.config.max_upload_mb} MB.`);
+    pickedSkus($('#upload-skus', form));
     const video = await api('/api/videos', {method:'POST',body:new FormData(form)});
     if (current === state.route) location.hash = `video/${encodeURIComponent(video.id)}`;
     else toast('Vídeo enviado. Veja o resultado em Contar produtos.');
@@ -145,7 +154,8 @@ document.addEventListener('click', event => {
   const button = event.target.closest('#retry-button');
   if (button) run(button, 'Tentando novamente…', async () => {
     const current = state.route;
-    await api(`/api/videos/${encodeURIComponent(state.video.id)}/retry`, {method:'POST'});
+    const picker = $('#retry-skus');
+    await api(`/api/videos/${encodeURIComponent(state.video.id)}/retry`, picker ? {method:'POST',body:{sku_ids:pickedSkus(picker)}} : {method:'POST'});
     if (current === state.route) await route(); else toast('Nova análise iniciada. Veja o resultado em Contar produtos.');
   });
 });
