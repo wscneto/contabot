@@ -10,3 +10,6 @@ data_*/
 demo/
 *.egg-info/
 .coverage
+
+# Assets de demonstração do seed (o padrão demo/ acima é do MVP antigo)
+!supabase/seed/demo/

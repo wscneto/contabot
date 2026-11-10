@@ -1,0 +1,32 @@
+{
+  "simulated": true,
+  "warning": "Cena desenhada para demonstração de fluxo. Não é uma contagem física verificada e não sustenta alegações de precisão operacional.",
+  "video": "prateleira_simulada.mp4",
+  "duration_seconds": 6,
+  "shelf": "Prateleira demo",
+  "section": "Seção 01",
+  "selected_skus": [
+    "DEMO-A",
+    "DEMO-B"
+  ],
+  "skus": [
+    {
+      "id": "DEMO-A",
+      "name": "Caixa fictícia A",
+      "variant": "50 g",
+      "reference_photo": "DEMO-A.jpg"
+    },
+    {
+      "id": "DEMO-B",
+      "name": "Caixa fictícia B",
+      "variant": "100 g",
+      "reference_photo": "DEMO-B.jpg"
+    }
+  ],
+  "rendered_quantities": {
+    "DEMO-A": 3,
+    "DEMO-B": 2
+  },
+  "coverage": "Uma seção completa; as mesmas cinco caixas aparecem repetidamente, com leve movimento de câmera.",
+  "evaluation_split": "synthetic_demo_only"
+}
