@@ -1,121 +1,173 @@
-# Contabot
+# Contabot 📱📦
 
-MVP de contagem por vídeo, com Python/OpenCV, FastAPI, SQLite e interface responsiva em português. O fluxo é: **cadastrar produtos com fotos → enviar vídeo → conferir a sugestão**. O sistema procura automaticamente os SKUs cadastrados, seleciona imagens e solicita uma única contagem consolidada dos produtos identificados.
+Sistema de contagem visual de estoque por vídeo: **aplicativo mobile (Expo / React Native)** sobre **Supabase** (Postgres + Auth + Storage + Edge Functions). O próprio celular escolhe os melhores quadros do vídeo; a contagem é feita por um modelo de visão chamado via API no servidor.
 
-## Executar com sua assinatura ChatGPT
+Projetado especificamente para as operações do dia a dia no varejo, dividindo as responsabilidades com foco total em **experiência do usuário (UI/UX)**:
+- **Gerente da Loja**: Gestão visual do catálogo de produtos com fotos da embalagem, mapeamento de áreas/gôndolas, emissão de tarefas de contagem, aprovação com histórico de auditoria e monitoramento de divergências de estoque.
+- **Funcionário no Salão/Estoque**: Aplicativo de celular ultra-simplificado e à prova de erros. Login rápido via Código de Acesso ou QR Code, filmagem guiada da prateleira (com timer e dicas de foco), contagem por IA em segundo plano e tela ergonômica de conferência com botões de ajuste rápido (+/-) e fotos de evidência antes do envio.
 
-Requisitos: [uv](https://docs.astral.sh/uv/), Python 3.11+, FFmpeg/ffprobe no PATH e [Codex CLI](https://developers.openai.com/codex/cli/) instalado. O adaptador foi testado com `codex-cli 0.154.0`.
+---
 
+## 🏗️ Arquitetura do Projeto
+
+```
+contabot/
+├── mobile/                  # App Expo SDK 58 (Expo Router)
+│   ├── src/
+│   │   ├── app/             # Rotas: (auth), (employee), (manager)
+│   │   ├── components/      # Design System (Button, Card, Stepper, Badge, QRCodeModal, Input)
+│   │   ├── lib/supabase.ts  # Cliente Supabase (sessão persistida com expo-sqlite)
+│   │   └── services/
+│   │       ├── api.ts       # RPCs, Edge Functions e URLs assinadas do Storage
+│   │       └── capture.ts   # Seleção de quadros no aparelho + envio + disparo da análise
+│   └── metro.config.js      # Inclui supabase/functions/_shared no bundle
+│
+├── supabase/
+│   ├── migrations/          # Tabelas, RLS, bucket "media" e RPCs (regras de negócio)
+│   ├── functions/
+│   │   ├── _shared/         # frame-selection.ts (celular + servidor), prompts, validação, provedores
+│   │   ├── analyze-capture/ # Identificar → contar com o modelo de visão (VISION_*)
+│   │   ├── create-employee/ # Gerente cadastra funcionário e recebe o código de acesso
+│   │   ├── join-store/      # Login do funcionário por código (sem e-mail)
+│   │   └── tests/           # Testes unitários (Deno)
+│   ├── scripts/seed-demo.ts # Loja de demonstração
+│   └── tests/               # Teste de ponta a ponta contra o Supabase local
+│
+└── docs/arquitetura.md      # Dados, contratos e fluxos
+```
+
+**Fluxo de uma contagem por vídeo**
+
+1. O funcionário filma (ou escolhe da galeria) e o app cria a captura (`start_capture`).
+2. **No celular** (`services/capture.ts`): o `expo-video` extrai ~1 quadro/s; cada quadro é reduzido a 640 px e pontuado (nitidez, exposição, movimento, reflexo, assinatura de similaridade). São escolhidos até 5 quadros de identificação e até 20 no total, incluindo vizinhos a ±2/4/6 s para a etapa de contagem.
+3. Só esses quadros (JPEG ≤ 1920 px) vão para o Storage. O vídeo não sai do aparelho.
+4. A Edge Function `analyze-capture` chama o modelo duas vezes, **identificar** e **contar**, valida a resposta com as mesmas regras do backend antigo e grava as sugestões. O app acompanha pelas etapas da captura.
+5. Qualquer falha manda a contagem para conferência manual. Ela nunca fica presa em "analisando".
+
+---
+
+## 🚀 Como Iniciar o Supabase
+
+### Pré-requisitos
+- Docker (para o Supabase local)
+- Node.js 18+ (a CLI roda via `npx supabase`)
+- [Deno](https://deno.com/) 2+ (seed e testes)
+
+### 1. Subir o Supabase local e aplicar as migrations
 ```bash
-uv sync --locked
+npx supabase start          # primeira vez baixa as imagens Docker
+npx supabase db reset       # recria o banco com supabase/migrations
+npx supabase status         # mostra API_URL, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, Studio...
+```
+
+### 2. Popular dados de demonstração
+Cria o *Mercadinho Bom Preço* com gerente, 2 funcionários, produtos com fotos, gôndolas e contagens em vários estados:
+```bash
+eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=')"
+SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY deno run -A supabase/scripts/seed-demo.ts
+```
+
+### 3. Configurar o modelo de visão e servir as Edge Functions
+```bash
+cp supabase/functions/.env.example supabase/functions/.env   # VISION_PROVIDER=mock por padrão
+npx supabase functions serve --env-file supabase/functions/.env
+```
+O provedor é configurado só por variáveis `VISION_*` (detalhes em `supabase/functions/.env.example`). Use `VISION_PROVIDER=chat` com qualquer API compatível com **OpenAI Chat Completions** (OpenAI, Gemini, OpenRouter, DeepInfra, Groq, vLLM...) ou `mock` para demonstração sem modelo. A chave fica só no servidor, nunca no app.
+
+### 4. Projeto na nuvem (recomendado para testar no celular)
+```bash
+npx supabase link --project-ref <ref-do-projeto>
+npx supabase db push
+npx supabase functions deploy analyze-capture create-employee join-store
+npx supabase secrets set --env-file supabase/functions/.env
+```
+No painel do projeto, em *Authentication → Sign In / Providers → Email*, desligue **Confirm email** para o gerente entrar logo após o cadastro. Se ficar ligado, o app pede a confirmação do e-mail antes do primeiro login.
+
+---
+
+## 📱 Como Iniciar o Aplicativo Mobile
+
+### Pré-requisitos
+- Aplicativo **Expo Go** instalado no seu celular Android ou iOS. A análise de vídeo não roda na versão Web.
+
+### 1. Instalar dependências e configurar o Supabase
+```bash
+cd mobile
+npm install
 cp .env.example .env
-codex login
-uv run uvicorn contabot.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
+Preencha `EXPO_PUBLIC_SUPABASE_URL` e `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`:
+- **Projeto cloud**: `https://<ref>.supabase.co` e a *publishable key* do painel. Funciona em qualquer rede.
+- **Supabase local**: `http://IP_DO_SEU_PC:54321` e a `PUBLISHABLE_KEY` de `npx supabase status`. O celular precisa alcançar a porta 54321 do PC: mesma rede Wi-Fi, sem isolamento de clientes, e porta liberada no firewall (`sudo ufw allow 54321/tcp`). `127.0.0.1` só funciona no navegador do próprio PC.
 
-No login, escolha sua conta ChatGPT. Se já estiver conectado, basta verificar com `codex login status`. Abra **http://127.0.0.1:8000**. O `uv` gerencia o ambiente automaticamente; não é necessário ativar um ambiente manualmente.
-
-A configuração padrão usa **Codex com login ChatGPT**, modelo **`gpt-5.6-luna`**, que aceita imagens. O modelo pode ser trocado em `CONTABOT_MODEL` por outro com entrada de imagens disponível na sua conta. O processamento usa o acesso da assinatura pelo CLI e seus limites; não transforma a assinatura em créditos de API. A aplicação não lê tokens e recusa login por chave API nesse modo. Consulte [autenticação oficial](https://learn.chatgpt.com/docs/auth) e [execução não interativa](https://learn.chatgpt.com/docs/non-interactive-mode).
-
-O arquivo `.env` é opcional: sem configurações no arquivo ou no terminal, o programa usa os valores padrão acima. `.env.example` serve como modelo e não é carregado pelo aplicativo. Para alterar o modelo, edite `.env` ou defina `CONTABOT_MODEL` no terminal e reinicie o servidor; uma configuração explícita prevalece sobre o padrão do código.
-
-Para acesso pelo celular na mesma rede, substitua o host por `0.0.0.0` e abra `http://IP-DO-COMPUTADOR:8000`. Use somente uma instância, em máquina/rede privada: o protótipo não tem autenticação, e o processamento usa o login do computador. Vídeos, catálogo, sugestões e correções ficam em `data/`; preserve essa pasta para manter as evidências. `.env` e `data/` não entram no Git.
-
-## Testar em outro computador
-
+### 2. Iniciar o Metro Bundler / Expo
 ```bash
-git clone https://github.com/wscneto/contabot.git
-cd contabot
-uv sync --locked
-cp .env.example .env
+npx expo start --tunnel ngrok
 ```
+Este é o comando padrão do projeto. O túnel via ngrok faz o celular se conectar ao Metro pela internet, sem depender da rede local. Assim, firewall do PC (ex.: `ufw`) e isolamento de clientes em Wi-Fi de universidade ou de convidados não atrapalham. Usar `ngrok` explicitamente evita o túnel padrão do Expo, que exige login em uma conta Expo.
 
-Escolha o modo no `.env` antes de iniciar o servidor:
+- Para testar no celular físico: abra o app **Expo Go** e escaneie o QR Code exibido no terminal.
+- O túnel cobre só o Metro. O acesso ao Supabase segue o endereço configurado no passo 1.
+- Alternativa sem túnel (`npm start`): só funciona se o celular e o computador estiverem na mesma rede Wi-Fi e a porta `8081` estiver liberada no firewall.
 
-| Modo | Configuração | Acesso necessário |
-| --- | --- | --- |
-| Simulação | `CONTABOT_PROVIDER=mock` | Nenhuma conta; os números são fictícios. |
-| ChatGPT próprio | `CONTABOT_PROVIDER=codex` | Instale o Codex CLI e execute `codex login` com sua própria conta, com acesso ao modelo escolhido. |
-| Intermediários / API | `CONTABOT_PROVIDER=chat` | Use DeepInfra, OpenRouter, Together, Hugging Face ou vLLM local via `/v1/chat/completions`. |
-| API Responses | `CONTABOT_PROVIDER=responses` | Preencha `OPENAI_API_KEY` com sua chave local; cobrança separada da assinatura ChatGPT. |
+---
 
+## 👥 Credenciais de Demonstração
+
+Ao rodar `supabase/scripts/seed-demo.ts`, as seguintes credenciais são criadas automaticamente:
+
+| Perfil | Identificação | Credencial | Acesso / Permissões |
+| :--- | :--- | :--- | :--- |
+| **Gerente** (Carla) | `demo@contabot.app` | Senha: `contabot` | Acesso total: criação de tarefas, aprovação, cadastro de produtos com fotos, mapeamento de áreas, convite à equipe. |
+| **Funcionária** (Ana) | Código de Acesso | `ANA1-2345` | Foco em filmagem: lista de contagens atribuídas, câmera inteligente, revisão de quantidades e envio. |
+| **Funcionário** (João) | Código de Acesso | `JOAO-6789` | Foco em filmagem e recontagens solicitadas pelo gerente. |
+
+> 💡 **Dica de Usabilidade**: Na tela de login do app mobile, há botões de preenchimento rápido ("Entrar como Gerente Carla" e "Entrar como Ana") para facilitar a demonstração imediata sem digitação.
+
+---
+
+## 🔄 Fluxos de Trabalho Reestruturados
+
+### 1. Fluxo do Funcionário (Simples, Rápido e Sem Ruído)
+1. **Login Instantâneo**: Digita o código de 8 dígitos ou escaneia o QR Code fornecido pelo gerente.
+2. **Minhas Contagens**: Lista somente as áreas que ele precisa contar no momento. Destaque visual em vermelho para solicitações de **Recontagem**.
+3. **Câmera Guiada**: Interface com retículo central, nível de estabilidade, dicas de filmagem ("Mantenha velocidade constante", "Mostre topo e laterais"), botão de ligar/desligar lanterna (torch) e temporizador de 60 segundos com parada automática.
+4. **Análise em Segundo Plano**: O celular escolhe e envia os melhores quadros; em seguida a IA identifica e conta os produtos no servidor, com o progresso de cada etapa na tela.
+5. **Conferência na Prateleira**: Tela com cartões grandes e botões `+` e `-` ergonômicos (com feedback tátil Haptics). Para cada produto, o funcionário pode tocar em **"Ver Evidência"** para abrir a foto ampliada onde a IA detectou as unidades.
+6. **Submissão**: Ao clicar em "Confirmar e Enviar", a contagem é enviada para validação da gerência.
+
+### 2. Fluxo do Gerente (Controle e Auditoria)
+1. **Painel Geral (Dashboard)**: Métricas em tempo real — contagens aguardando aprovação, alertas de estoque baixo e gôndolas sem conferência recente.
+2. **Aprovação de Contagens**: Visão comparativa lado a lado: *Estoque Teórico* vs *Sugerido pela IA* vs *Confirmado pelo Funcionário*.
+   - Se os números baterem: o gerente clica em **Aprovar**, o estoque é atualizado e o histórico é gravado.
+   - Se houver divergência suspeita: o gerente clica em **Solicitar Recontagem**, adiciona uma instrução (ex: *"Afaste um pouco a câmera para filmar a fileira de trás"*) e a tarefa volta automaticamente para o funcionário.
+3. **Gestão de Produtos**: Cadastro com fotos reais das embalagens tiradas pela câmera do celular ou da galeria.
+4. **Gestão de Áreas**: Criação de seções da loja (ex: *Biscoitos e Snacks*, *Bebidas*, *Higiene*) e associação dos produtos esperados em cada uma, otimizando o processamento visual e reduzindo falsos positivos.
+5. **Gestão de Equipe**: Geração de códigos e exibição de QR Code em tela cheia para conectar novos funcionários na hora.
+
+---
+
+## 🧪 Testes e Qualidade de Código
+
+### Testes unitários (seleção de quadros, validação, provedores)
 ```bash
-uv run uvicorn contabot.app:create_app --factory --port 8000
+cd supabase/functions && deno test tests/
 ```
 
-Abra `http://127.0.0.1:8000`. FFmpeg/ffprobe é necessário também no modo simulado. Cada clone começa com catálogo vazio; gere os exemplos conforme a demonstração abaixo ou cadastre suas fotos e envie um vídeo. Login do Codex, chaves, catálogo e vídeos da máquina original não acompanham o repositório.
-
-No PowerShell, use `Copy-Item .env.example .env` no lugar de `cp`; os comandos `uv` são iguais. A aplicação foi validada em Linux. Windows nativo e macOS ainda precisam de validação; no Windows, WSL2 permite experimentar o ambiente Linux. O teste opcional `scripts/browser_smoke.py` usa recursos POSIX e precisa de Linux, WSL ou macOS.
-
-## Usar
-
-1. Em **Meus produtos**, informe o nome e envie de uma a quatro fotos legíveis da embalagem. Inclua a variante no nome quando houver produtos parecidos e use fotos da versão exata.
-2. Em **Contar produtos**, escolha o vídeo e clique para contar. Todos os produtos vêm marcados em **Produtos a contar**; desmarque os que não aparecem no vídeo para uma análise mais rápida e barata. Não precisa preencher dados de pessoas ou descrever prateleiras.
-3. Aguarde a identificação e a contagem. Confira as sugestões e, se necessário, corrija as quantidades. A sugestão original continua preservada. As imagens ficam disponíveis em **Ver imagens**.
-
-Para corrigir nome ou referência, use **Editar** no produto. Fotos novas substituem as referências atuais; sem novas fotos, as anteriores são mantidas. **Tentar novamente** analisa o mesmo vídeo usando o catálogo atualizado; em **Escolher produtos para “Tentar novamente”** dá para limitar a nova análise a alguns produtos. A nova análise substitui o resultado anterior do vídeo.
-
-Para remover um produto, clique em **Excluir** ao lado dele e confirme. O produto deixa de participar de novas análises; fotos e resultados anteriores são preservados. Se excluir todos os produtos, cadastre outro antes de enviar ou reanalisar um vídeo.
-
-Filme uma área pequena, devagar e com os produtos parados, incluindo uma visão geral e detalhes das caixas. Mostre topo ou laterais para revelar unidades atrás das primeiras. Gavetas precisam estar abertas, em vídeo próprio. Unidades totalmente ocultas não podem ser visualmente contadas.
-
-Cada vídeo recebe uma contagem única; imagens sobrepostas não são somadas. Sem cobertura suficiente ou correspondência entre caixas nos diferentes ângulos, o resultado fica incompleto ou desconhecido. **Não identificado** significa que o SKU não foi reconhecido nos frames, não comprova estoque zero. Não há total entre vídeos, pois eles podem mostrar as mesmas caixas. As quantidades permanecem sugestões até a conferência; salvar uma correção não transforma cobertura incompleta em comprovação visual.
-
-Texto pequeno ou gramatura ilegível não bloqueiam, por si só, uma correspondência visual distintiva com a referência. Uma variante explicitamente diferente continua separada. Quando não for possível consolidar o vídeo inteiro, o modelo pode contar as unidades distinguíveis em **um único frame**, preferindo a vista lateral ou superior que mostra mais caixas. A interface indica **unidades visíveis / contagem parcial** e liga esse número à imagem contada; outras imagens ajudam a reconhecer a embalagem, mas não acrescentam unidades à contagem desse frame.
-
-## Onde acontece a requisição
-
-Em [contabot/providers.py](contabot/providers.py), a interface `VisionProvider` tem duas operações: `identify()` e `count()`. `CodexProvider._infer()` chama `codex exec` com as imagens, referências e esquema JSON. O CLI usa um diretório temporário, ferramentas desativadas e o login ChatGPT já existente. Somente frames selecionados e fotos de referência são enviados; o vídeo completo é processado localmente.
-
-`contabot/app.py` coordena extração → identificação no catálogo inteiro → contagem dos candidatos. Catálogos maiores são identificados em lotes. A contagem mantém todos os candidatos e seus frames na mesma requisição; se ultrapassar o limite de imagens, solicita uma captura menor, sem somar resultados parciais. A análise executa em segundo plano, uma por vez, e a interface consulta o andamento.
-
-A identificação usa até `CONTABOT_MAX_FRAMES` imagens distribuídas pelo vídeo (padrão: 5). Após localizar os produtos, a contagem inclui frames dos segundos anteriores e posteriores, buscando outros ângulos, até `CONTABOT_MAX_COUNT_FRAMES` (padrão: 10). O limite combinado de imagens ainda inclui todas as referências. A seleção mantém as imagens de identificação como contexto e registra os IDs usados em cada etapa. Nitidez ou diversidade visual ajudam a escolher candidatos, mas a decisão de qual frame permite separar as caixas cabe ao modelo. Vídeos antigos têm seus candidatos extraídos novamente na primeira reanálise após esta atualização.
-
-O adaptador opcional `ResponsesProvider` faz `client.post(self.endpoint, ...)` para a Responses API ou servidor local compatível. Para usá-lo, configure `CONTABOT_PROVIDER=responses`, modelo, endpoint e chave em `.env`. **API tem cobrança separada da assinatura ChatGPT**. Não há fallback automático do CLI para API. O exemplo deixa `OPENAI_API_KEY` vazia.
-
-Os limites de duração, tamanho, imagens e amostragem estão em [.env.example](.env.example). São padrões do aplicativo, não limites universais dos provedores. Uso de tokens e duração do processamento ficam no resultado exportado quando informados pelo provedor. O aplicativo não calcula cobrança automaticamente; uma projeção documentada do teste está em [docs/custos-api.md](docs/custos-api.md).
-
-## Demonstração sem modelo e testes
-
-Para experimentar as telas sem consumir a assinatura, use `CONTABOT_PROVIDER=mock` em `.env` e reinicie o servidor. Esse modo exibe **SIMULAÇÃO** e devolve números fixos; não analisa imagens.
-
+### Teste de ponta a ponta (Supabase local + Edge Functions com `VISION_PROVIDER=mock`)
 ```bash
-uv run python scripts/generate_demo.py
+eval "$(npx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
+SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
+  deno test -A supabase/tests/integration.test.ts
 ```
+*Cobre cadastro, login por código, isolamento entre lojas (RLS e Storage), captura → identificação → contagem → envio → recontagem → aprovação → estoque, e desativação de funcionário.*
 
-Cadastre dois produtos usando `demo/DEMO-A.jpg` e `demo/DEMO-B.jpg`, envie `demo/prateleira_simulada.mp4`, veja os resultados e corrija para A=3 e B=2. As sugestões do simulador são deliberadamente fictícias.
-
+### Checagem de tipos do mobile
 ```bash
-uv run pytest -q
-uv run python -m scripts.smoke_demo
+cd mobile && npx tsc --noEmit
 ```
 
-A demonstração automatizada usa banco temporário e gera exportação e avaliação sintética em `demo/smoke/`, preservando o catálogo da loja. Os testes verificam respostas inválidas, SKUs/frames desconhecidos, zero versus desconhecido, identificação automática, pendências, ausência de somas por imagem, preservação da sugestão, orientação e timestamps de vídeo. Nenhum teste automatizado chama o modelo real.
+---
 
-Teste opcional do fluxo no navegador:
-
-```bash
-uv sync --locked --extra browser
-uv run --extra browser playwright install chromium
-uv run --extra browser python -m scripts.browser_smoke
-```
-
-Com Chromium já instalado: `uv run --extra browser python -m scripts.browser_smoke --chromium /usr/bin/chromium`. O teste usa servidor e dados temporários, incluindo largura de celular.
-
-Validação desta versão: **144 testes Python passaram**, demonstração HTTP e avaliação sintética passaram, e Chromium percorreu cadastro, vídeo, correção, edição, nova análise e exclusão em desktop/celular. Também foram verificados a inclusão de um ângulo lateral após o reconhecimento frontal, o limite combinado de imagens e o resultado numérico parcial com evidência única. A exclusão preserva o histórico e as fotos, e o cancelamento mantém o produto cadastrado. Contagens parciais mantêm seu rótulo e a sugestão original após correção. Dois avisos de descontinuação de Starlette/AnyIO permanecem nas dependências de teste.
-
-## Avaliação e limitações
-
-O mecanismo de avaliação compara sugestões originais com contagens físicas e separa dados de ajuste e avaliação final. Dados de tempo de captura, correção e processo manual são opcionais na avaliação externa; não fazem parte dos formulários da loja. Veja [docs/avaliacao.md](docs/avaliacao.md).
-
-Não há precisão operacional comprovada. Um vídeo real foi usado para testar a integração, mas não foi fornecida sua contagem física verificada. Resultados desse teste e limitações observadas estão em [docs/teste-video-real.md](docs/teste-video-real.md). Vídeos usados para ajustar o prompt devem ficar fora da avaliação final.
-
-A seleção de frames combina qualidade e distribuição temporal, registra nitidez/exposição/movimento/possível reflexo e elimina imagens quase idênticas. Essas medidas são heurísticas; não demonstram cobertura ou deduplicação de produtos. Vídeos com baixa resolução, embalagens parecidas, reflexos, rótulos pequenos e unidades escondidas continuam difíceis. Não há reconstrução 3D, rastreamento de caixas, deduplicação entre vídeos ou conversão HDR dedicada.
-
-As respostas passam por um esquema estrito, mas JSON válido não prova reconhecimento correto. O modelo pode confundir variantes e errar a contagem. Produtos desconhecidos não devem ser forçados ao catálogo. Falhas deixam o vídeo disponível para nova tentativa, sem repetição automática de chamadas. Reiniciar o servidor interrompe trabalhos em andamento; não há fila durável ou suporte a múltiplos processos.
-
-A versão simplificada mantém os SKUs existentes e não apaga tabelas da versão anterior. As antigas telas de sessões/seções foram retiradas. ERP, sensores e treinamento próprio permanecem fora do MVP.
-
-## Privacidade e Provedores Externos
-
-Ao utilizar `CONTABOT_PROVIDER=chat` com intermediários (DeepInfra, OpenRouter, Together AI) ou APIs de terceiros, os frames extraídos do vídeo e as fotos de referência do catálogo são transmitidos ao fornecedor configurado. Antes de rodar testes com dados confidenciais ou em produção, verifique a política de retenção de dados, logs e uso para treinamento do provedor e dos intermediários envolvidos.
+## 📄 Documentação Detalhada
+Para consultar os detalhes dos esquemas de banco de dados, máquinas de estado de tarefas, modelo de custos de API e especificações dos contratos JSON, acerte a pasta [`docs/`](docs/).
