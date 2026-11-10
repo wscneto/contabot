@@ -1,134 +1,130 @@
 # ContaBot Mobile: arquitetura e plano de execução
 
-Cópia de 10/11/2026. A versão viva, com comentários e diagramas editáveis, está em [Claude Docs](https://claude.ai/artifact/Pbv2vaWN9tYBGXTnoSPe9Y).
-
 ## Resumo
 
-Vamos entregar em 20 dias um MVP funcional do ContaBot para Android e iPhone, feito por três pessoas. O funcionário entra com seu login, cadastra produtos com fotos, filma a prateleira e confere a contagem sugerida pela IA.
+O ContaBot virou um app mobile em Expo com backend no Supabase, e a maior parte do MVP já está no repositório desde o PR #1 do Walter, de 10/11/2026. Os 20 dias agora servem para validar o que existe, ligar a IA real, testar em aparelhos e preparar a entrega.
 
-A arquitetura continua completa de ponta a ponta, mas cada peça usa a forma mais simples que funciona. O que não é necessário para o fluxo principal foi para “Evolução depois do MVP”, no fim deste documento.
+O app atende dois papéis. O gerente cadastra produtos, divide a loja em áreas, cria contagens e aprova os números. O funcionário vê o que contar, filma, confere a sugestão da IA e envia.
+
+**Situação em 10/11/2026**
+
+| Verificação | Resultado |
+| --- | --- |
+| Testes unitários das Edge Functions | 33 de 33 passaram |
+| Checagem de tipos do app | Passou |
+| Teste de ponta a ponta com Supabase local | 2 de 2 passaram, com IA simulada |
+| App em celular real | Não testado |
+| IA real | Não testada; o padrão é o simulador |
 
 **O MVP está pronto quando, em um celular real:**
 
-1. O funcionário entra com e-mail e senha.
-2. Cadastra um produto com fotos tiradas no app.
-3. Grava um vídeo de até 60 segundos e o envia.
-4. Vê a quantidade sugerida e as imagens usadas como evidência.
-5. Corrige a quantidade, e a sugestão original continua guardada.
-6. Um usuário de outra loja não enxerga nada disso.
+1. O gerente cria a loja, cadastra um produto com fotos e monta uma área.
+2. O gerente cria um funcionário, e ele entra pelo código de acesso.
+3. O funcionário filma até 60 segundos e recebe a sugestão da IA.
+4. O funcionário confere e envia; o gerente aprova e o estoque é atualizado.
+5. Uma pessoa de outra loja não enxerga nada disso.
 
 **Premissas deste plano**
 
-- **Prazo:** 20 dias de desenvolvimento, para trabalho da faculdade. A meta é ter o MVP funcionando por volta do Dia 14.
+- **Prazo:** 20 dias, para trabalho da faculdade. A meta é ter o MVP funcionando por volta do Dia 13.
 - **Equipe:** 3 das 6 pessoas do grupo, uma por frente.
-- **Reaproveitamento:** app, banco e API são novos. O processamento de vídeo e a validação de IA partem do código já testado do MVP web.
+- **Base:** o código do PR #1. O contrato completo está em [arquitetura.md](arquitetura.md).
 - **Distribuição:** APK no Android e Expo Go no iPhone, sem publicar nas lojas agora.
-- **Conexão:** uso exclusivamente online, sem banco local nem sincronização.
+- **Conexão:** uso online. A fila offline citada em `arquitetura.md` não foi encontrada no código.
 
 ## Decisões de arquitetura
 
-O MVP usa um app Expo, um único serviço Python e o plano Free do Supabase. Isso elimina a maior parte da infraestrutura e deixa as três pessoas focadas no fluxo de contagem.
+Não existe mais servidor próprio. O app fala direto com o Supabase, que concentra login, banco, regras de negócio, arquivos e a chamada à IA.
 
-| Área | Decisão no MVP | Por que é o caminho rápido |
+| Área | Decisão atual | Por que ajuda |
 | --- | --- | --- |
-| App | [Expo SDK 58](https://expo.dev/changelog/sdk-58), TypeScript, Expo Router e TanStack Query | Uma base para Android e iPhone, com consulta periódica pronta |
-| Vídeo | [expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/) em 1080p, 6 Mbps e até 60 segundos, cerca de 45 MB | Roda no Expo Go e cabe no limite do plano Free |
-| Fotos | `expo-image-picker`, pela câmera ou galeria, salvas em JPEG | Evita tela de câmera própria para o catálogo |
-| Distribuição | APK gerado pelo EAS no Android e Expo Go no iPhone | Dispensa conta paga e revisão das lojas |
-| Upload | URL assinada direto ao storage, com o arquivo inteiro | O vídeo não passa pela API; em queda de rede, o app reenvia |
-| Backend | Um serviço FastAPI em um container com FFmpeg | Um único deploy e uma única configuração |
-| Worker | Thread no mesmo serviço, em módulo separado, uma análise por vez | Não trava a API e pode virar outro serviço depois |
-| Fila | A própria tabela `analyses`, com `FOR UPDATE SKIP LOCKED` | Sobrevive a reinícios sem Redis |
-| Banco | [Postgres do Supabase Free](https://supabase.com/docs/guides/storage/uploads/file-limits), com `tenant_id` nas tabelas e filtro em uma camada única da API | Isola as lojas sem escrever políticas para cada tabela |
-| Proteção do banco | RLS ligado em todas as tabelas, sem políticas | Fecha o acesso público direto do Supabase com pouco esforço |
-| Login | Supabase Auth com e-mail e senha; a API valida o token via [JWKS](https://supabase.com/docs/guides/auth/signing-keys) | Login pronto; usuários criados por script |
-| Sessão | [expo-secure-store](https://docs.expo.dev/versions/latest/sdk/securestore/) | Keychain no iOS e Keystore no Android |
-| IA | `gpt-5.6-luna` pela API, com chave só no backend e um simulador | Modelo barato, já usado no MVP, e testes sem custo |
-| Contrato | Tabela deste documento e `/docs` automático do FastAPI | Elimina mock e geração de código |
+| App | Expo SDK 58, Expo Router, TanStack Query e `supabase-js` | Uma base para Android e iPhone |
+| Captura | `expo-camera`, até 60 segundos | Roda no Expo Go |
+| Seleção de frames | No celular, com `expo-video` e `jpeg-js`; até 20 JPEG de até 1920 px | O vídeo nunca sobe, então o limite de 50 MB deixa de importar |
+| Regras de negócio | RPCs em SQL no Postgres | Sem servidor para hospedar e manter |
+| Análise | Edge Function `analyze-capture`, em Deno, uma invocação por etapa | Cabe no limite de tempo das Edge Functions |
+| Segurança | RLS por loja; nenhuma escrita direta nas tabelas | O banco bloqueia acesso cruzado |
+| Login | Gerente com e-mail e senha; funcionário com código de acesso ou QR | Funcionário não precisa de e-mail |
+| Arquivos | Bucket privado `media`, com pastas por loja e URLs assinadas por 1 hora | Fotos e frames não ficam públicos |
+| IA | Qualquer API compatível com Chat Completions, configurada por `VISION_*`; simulador por padrão | Troca de fornecedor sem mudar código |
+| Contrato | [arquitetura.md](arquitetura.md) | Documentação junto do código |
 
 **Decisões em aberto**
 
 | Decisão | Recomendação | Necessária até |
 | --- | --- | --- |
-| Login por funcionário ou por loja | Um login por funcionário, com tenant por loja | Dia 1 |
-| Catálogo por loja ou por rede | Catálogo separado por loja | Dia 1 |
-| Repositório | Usar o repositório atual, marcando a versão web com a tag mvp-web | Decidido |
+| Login | Gerente com e-mail; funcionário com código de acesso | Decidido |
+| Catálogo por loja ou por rede | Catálogo separado por loja | Decidido |
+| Repositório | Usar o repositório atual | Decidido |
 | Fornecedor e modelo de IA | Usar gpt-5.6-luna e validar com um vídeo real | Dia 2 |
-| Hospedagem de API e worker | Serviço com Docker que não hiberne durante a análise | Dia 2 |
-| Reaproveitar o processamento do MVP web | Copiar domain.py, video.py e, de providers.py, ResponsesProvider e MockProvider | Decidido |
+| Projeto Supabase na nuvem | Criar no plano Free e publicar migrações e funções | Dia 2 |
+| Fila offline de envio | Está documentada, mas não implementada; decidir se entra | Dia 2 |
 
 ## Arquitetura geral
 
-O app só conversa com a API e com URLs assinadas do storage. Banco, fila e fornecedor de IA ficam atrás do backend e nunca são acessados pelo aparelho.
+O app conversa só com o Supabase: login no Auth, dados pelas RPCs e imagens pelo Storage. A IA é chamada apenas pela Edge Function, que guarda a chave.
 
 ```mermaid
 flowchart TB
-    app["App mobile (Expo)<br/>Câmera, envio, telas e sessão segura"]
-    api["API FastAPI<br/>Valida JWT, tenant e limite diário<br/>Cria análises e assina URLs"]
-    storage["Storage privado<br/>Vídeos, fotos e frames por tenant"]
-    auth["Supabase Auth<br/>Login com e-mail e senha"]
-    db["Postgres<br/>Dados com tenant_id<br/>Tabela analyses como fila"]
-    worker["Worker (mesmo serviço)<br/>FFmpeg, seleção de frames e IA"]
-    ia["Fornecedor de IA<br/>Recebe frames e fotos de referência"]
+    app["App mobile (Expo)<br/>Gerente e funcionário<br/>Escolhe os frames no celular"]
+    auth["Supabase Auth<br/>Gerente: e-mail e senha<br/>Funcionário: código ou QR"]
+    db["Postgres e RPCs<br/>Regras de negócio em SQL<br/>RLS por loja"]
+    storage["Storage privado<br/>Fotos e frames por loja"]
+    edge["Edge Functions<br/>analyze-capture, create-employee, join-store<br/>Guardam a chave de IA"]
+    ia["Fornecedor de IA<br/>API Chat Completions ou simulador"]
 
-    app -- "HTTPS com JWT" --> api
-    app -- "envio por URL assinada" --> storage
     app -- "login" --> auth
-    api -- "assina" --> storage
-    api -- "consultas por tenant" --> db
-    worker -- "fila" --> db
-    worker -- "baixa vídeo, grava frames" --> storage
-    worker -- "frames" --> ia
+    app -- "RPCs e Edge Functions" --> db
+    app -- "fotos e frames" --> storage
+    edge -- "pipeline_*" --> db
+    edge -- "lê frames" --> storage
+    edge -- "frames" --> ia
 ```
 
 ### Fluxo de uma contagem
 
-O vídeo vai direto ao storage e a análise roda fora da requisição. Assim, a API responde rápido e uma análise interrompida volta para a fila ao reiniciar o serviço.
+O celular escolhe os frames e envia só eles. A análise roda em segundo plano na Edge Function, e o app consulta o andamento a cada 1,5 segundo.
 
 ```mermaid
 flowchart LR
-    p1["1. App grava o vídeo"] --> p2["2. API autoriza o upload"]
-    p2 --> p3["3. App envia com URL assinada"]
-    p3 --> p4["4. API registra e cria a análise"]
-    p4 -- "fila no Postgres" --> p5["5. Worker pega a análise"]
-    p5 --> p6["6. Extrai e escolhe frames"]
-    p6 --> p7["7. IA identifica os produtos"]
-    p7 --> p8["8. IA conta e resposta é validada"]
-    p8 --> s1["completed"] & s2["needs_review"] & s3["no_matches"] & s4["failed"]
-    s1 & s2 & s3 & s4 --> p9["9. App consulta e funcionário confere"]
-    p9 -- "tentar novamente" --> p5
+    p1["1. Gerente cria a contagem"] --> p2["2. Funcionário filma até 60 s"]
+    p2 --> p3["3. Celular escolhe até 20 frames"]
+    p3 --> p4["4. Envia os frames e pede a análise"]
+    p4 -- "analyze-capture em segundo plano" --> p5["5. IA identifica os produtos da área"]
+    p5 --> p6["6. IA conta e a resposta é validada"]
+    p6 --> p7["7. Funcionário confere e envia"]
+    p7 --> p8["8. Gerente aprova e o estoque atualiza"]
+    p8 -- "ou pede recontagem" --> p2
 ```
 
-Cada nova análise do mesmo vídeo cria outra linha em `analyses`. A sugestão original e as correções ficam em campos separados.
+Se a análise falhar ou nada for reconhecido, o funcionário confere manualmente no passo 7. Uma contagem pode ter várias capturas. A sugestão da IA, o número conferido pelo funcionário e o número aprovado pelo gerente ficam em campos separados.
 
 ### Tenant, login e permissões
 
-- **Tenant:** cada loja é um tenant, e toda tabela de negócio carrega `tenant_id`.
-- **Usuário:** cada funcionário tem um login próprio e pertence a uma única loja no MVP.
-- **Criação de conta:** por script de seed, sem cadastro público nem convite.
-- **Permissões:** todos os usuários da loja podem fazer tudo. Papéis ficam para depois.
-- **Requisição:** a API valida o JWT e descobre o `tenant_id` pelo vínculo do usuário. O app nunca informa a loja.
-- **Consultas:** todo acesso passa por um módulo de repositório que exige `tenant_id`. Um teste prova o isolamento entre lojas.
-- **Arquivos:** bucket privado, com caminhos iniciados por `tenant_id` e acesso por URL assinada.
+- **Loja:** cada loja é um tenant em `stores`, e as tabelas carregam `store_id`.
+- **Gerente:** cria a conta pelo cadastro do app, que também cria a loja.
+- **Funcionário:** é criado pelo gerente e entra com código de acesso ou QR. O código fica guardado só como hash.
+- **Papéis:** cada RPC confere se a pessoa é gerente ou funcionário.
+- **RLS:** membros ativos só leem dados da própria loja, e toda escrita passa pelas RPCs.
+- **Arquivos:** bucket privado `media`, com pastas por loja. Só o gerente envia fotos de produto.
 
 ### Comunicação com a IA
 
-- A chave do fornecedor existe apenas como variável de ambiente do backend. O app nunca a recebe.
-- O worker envia somente frames selecionados e fotos de referência, nunca o vídeo completo.
-- Duas operações compõem a análise: `identify` encontra os produtos e `count` conta os encontrados.
-- A resposta passa por esquema estrito antes de ser salva. Resposta inválida vira falha registrada, nunca uma contagem.
-- Tokens e modelo ficam salvos em `analyses.usage`, para medir o custo real.
-- Um limite diário por loja protege os créditos da chave.
+- A chave fica nos segredos da Edge Function, em `VISION_API_KEY`. O app nunca a recebe.
+- O celular envia só os frames escolhidos; o vídeo fica no aparelho.
+- Identificação e contagem rodam em invocações separadas, e `pipeline_claim` impede análise duplicada.
+- A resposta passa por esquema estrito, com as regras do antigo `domain.py`.
+- O simulador é o padrão. A IA real exige configurar as variáveis `VISION_*`.
 
-### Uso exclusivamente online
+### Conexão
 
-- O app não tem banco local. Sem conexão, ele mostra uma mensagem e bloqueia as ações.
-- O vídeo gravado fica no aparelho até a API confirmar o registro, para o envio poder ser repetido.
-- A gravação é limitada a 1080p, 60 segundos e 48 MB, abaixo dos 50 MB do plano Free.
+- O app precisa de conexão para enviar e consultar.
+- `arquitetura.md` descreve uma fila offline de envio, mas ela não foi encontrada no código. A decisão fica para o Dia 2.
+- Se a análise falhar, o funcionário cai na conferência manual e não fica travado.
 
 ### Regras de produto que continuam valendo
 
-Estas regras foram aprendidas no MVP web e viram testes do novo backend.
+Estas regras vieram do MVP web e estão cobertas pelos testes de `vision.test.ts`.
 
 - Contagens de frames sobrepostos nunca são somadas, porque podem repetir caixas.
 - “Não identificado” e quantidade desconhecida não significam estoque zero.
@@ -139,161 +135,131 @@ Estas regras foram aprendidas no MVP web e viram testes do novo backend.
 
 ## Modelo de dados e contrato da API
 
-São cinco tabelas e dez rotas, combinadas no Dia 1. Depois disso, qualquer mudança de contrato precisa ser avisada às outras frentes.
+O contrato completo está em [arquitetura.md](arquitetura.md), mantido junto do código. Esta seção resume o que cada frente precisa saber.
 
-### Tabelas principais
+| Grupo | Tabelas |
+| --- | --- |
+| Lojas e pessoas | `stores`, `profiles`, `access_codes` |
+| Catálogo | `products`, `areas`, `area_products` |
+| Contagens | `tasks`, `task_items`, `task_events` |
+| Análise | `captures` |
+| Estoque | `stock_entries` |
 
-| Tabela | Guarda | Campos importantes | Frente dona |
-| --- | --- | --- | --- |
-| `tenants` | Lojas | `name`, `daily_analysis_limit` | A |
-| `memberships` | Vínculo usuário e loja | `user_id` (único), `tenant_id` | A |
-| `skus` | Produtos | `tenant_id`, `name`, `variant`, `photo_paths`, `archived_at` | A |
-| `videos` | Vídeos enviados | `tenant_id`, `created_by`, `filename`, `object_path`, `created_at` | A |
-| `analyses` | Cada análise e fila de trabalho | `tenant_id`, `video_id`, `sku_ids`, `status`, `stage`, `locked_until`, `attempts`, `model`, `frames`, `result`, `usage`, `corrections`, `corrected_by`, `corrected_at`, `error` | B |
+A contagem passa por `open`, `analyzing`, `review`, `submitted` e `approved`. Um pedido de recontagem a devolve para `open`.
 
-### Endpoints v1
+| Grupo de chamadas | Exemplos |
+| --- | --- |
+| Equipe | `whoami`, `list_team`, `create-employee`, `join-store`, `deactivate_member` |
+| Catálogo | `list_products`, `create_product`, `create_area`, `update_area` |
+| Contagens | `create_tasks`, `list_tasks`, `get_task`, `submit_task`, `approve_task`, `request_recount` |
+| Captura | `start_capture`, `register_capture_frames`, `analyze-capture`, `switch_to_manual` |
+| Painel | `get_dashboard` |
 
-Todas as rotas exigem `Authorization: Bearer <token>`. A loja vem do usuário autenticado, então não aparece na URL.
-
-| Método e rota | Função | Resposta principal |
-| --- | --- | --- |
-| `GET /v1/me` | Usuário e loja | `user`, `tenant` |
-| `POST /v1/uploads` | Autoriza um envio de `video` ou `photo` | `object_path`, `signed_url`, `token` |
-| `GET /v1/skus` | Lista produtos ativos | Produtos com URLs assinadas |
-| `POST /v1/skus` | Cria produto com 1 a 4 fotos enviadas | Produto criado |
-| `DELETE /v1/skus/{id}` | Arquiva produto | 204 |
-| `GET /v1/videos` | Lista os 50 vídeos mais recentes | Vídeos com estado |
-| `POST /v1/videos` | Registra o vídeo e cria a análise | 202 com `video_id` |
-| `GET /v1/videos/{id}` | Estado, resultados e frames | Análise atual |
-| `POST /v1/videos/{id}/retry` | Cria nova análise | 202 |
-| `PATCH /v1/videos/{id}/counts` | Salva quantidades conferidas | Análise atualizada |
-
-**Convenções do contrato**
-
-- Erros seguem `{ "code": "limit_exceeded", "message": "..." }`, com `message` pronto em português.
-- Códigos usados: 401, 404, 409, 413, 422 e 429.
-- O servidor gera o `object_path`. `POST /v1/videos` confere se ele pertence à loja e se o arquivo existe.
-- O app consulta `GET /v1/videos/{id}` a cada 3 segundos até o estado final.
-- Fotos e frames vêm como URLs assinadas de curta duração.
+Os nomes com hífen são Edge Functions; os demais são RPCs. Erros chegam em português.
 
 ## Estrutura do repositório e padrões de trabalho
 
-O projeto continua no repositório atual, reorganizado em uma branch nova. Assim, os módulos reaproveitados mantêm o histórico e os testes.
+O repositório já está reorganizado pelo PR #1. A versão web antiga saiu da `main` e continua no histórico do Git.
 
 ```text
 contabot/
-  mobile/                 App Expo: telas, câmera, envio e login
-  backend/
-    app/                  Rotas FastAPI, autenticação e repositório
-    pipeline/             Frames, prompts, validação e adaptador de IA
-    worker.py             Laço que processa a tabela analyses
-    tests/                Isolamento, regras de produto e API
-    Dockerfile            Python, FFmpeg e o serviço
-  supabase/migrations/    Tabelas e RLS
-  scripts/seed.py         Cria lojas e usuários da demonstração
+  mobile/src/app/(auth)/        Login e cadastro do gerente
+  mobile/src/app/(employee)/    Contagens, câmera, análise e conferência
+  mobile/src/app/(manager)/     Painel, contagens, produtos, áreas e equipe
+  mobile/src/services/          API, captura, seleção de frames e imagens
+  supabase/migrations/          Tabelas, RLS e RPCs
+  supabase/functions/           analyze-capture, create-employee, join-store
+  supabase/tests/               Teste de ponta a ponta
+  supabase/scripts/seed-demo.ts Dados de demonstração
+  docs/                         Arquitetura e este plano
 ```
-
-**Transição no Dia 1**
-
-1. Criar a tag `mvp-web` no estado atual da `main`, para a versão web continuar recuperável.
-2. Em uma branch nova, mover com `git mv` os módulos reaproveitados para `backend/pipeline/`, junto com seus testes.
-3. Criar `mobile/`, `backend/app/` e `supabase/migrations/`.
-4. Remover a interface web, o adaptador do Codex e o teste no navegador.
-5. Confirmar que as três pessoas têm acesso de escrita ao repositório.
 
 **Padrões de trabalho**
 
-- **Branches:** curtas, saindo da `main`, com merge no mesmo dia sempre que possível.
-- **Revisão:** rápida e obrigatória só em banco, contrato e regras de contagem.
-- **Ambientes:** local e um único ambiente publicado.
+- **Branches:** curtas, saindo da `main`, com pull request revisado por outra pessoa.
 - **Banco:** toda alteração entra por migração em `supabase/migrations`.
-- **Segredos:** chaves apenas em variáveis de ambiente, nunca no repositório ou no app.
-- **Testes:** `pytest` no GitHub Actions, sempre com o simulador de IA.
-- **Alinhamento:** 15 minutos por dia entre as três pessoas e demonstração nos Dias 2, 8, 14 e 18.
+- **Segredos:** chaves só nos segredos do Supabase e em `.env` locais, nunca no repositório.
+- **Testes:** `deno test` nas funções e `npx tsc --noEmit` no app. Ainda não há CI.
+- **Alinhamento:** 15 minutos por dia e demonstração nos Dias 2, 8, 13 e 18.
 
 ## Três frentes de trabalho
 
-Cada pessoa é dona de uma frente e consegue avançar com dados simulados enquanto as outras terminam. Os responsáveis ainda precisam ser preenchidos.
+As frentes continuam três, mas agora o trabalho é validar e completar o que existe. Os responsáveis ainda precisam ser preenchidos; o Walter é o candidato natural para a frente A, pois escreveu o backend.
 
 | Frente | Responsável | É dona de | Perfil indicado |
 | --- | --- | --- | --- |
-| **A. Backend e dados** | A definir | Supabase, migrações, seed, login, API e URLs assinadas | Python e banco de dados |
-| **B. Contagem e IA** | A definir | Worker, frames, IA, validação, medição de acerto, deploy e CI | Python e integração com IA |
-| **C. App mobile** | A definir | Expo, login, câmera, envio, telas e APK | React Native e TypeScript |
+| **A. Supabase e dados** | A definir | Projeto na nuvem, migrações, RPCs, RLS, seed, teste de ponta a ponta e CI | SQL e Supabase |
+| **B. Contagem e IA** | A definir | IA real, prompts, desempenho da seleção de frames, medição de acerto e custo | TypeScript e integração com IA |
+| **C. App mobile** | A definir | Testes em aparelhos, ajustes de telas, erros, APK e Expo Go | React Native e TypeScript |
 
 **Pontos de integração**
 
 | O que é entregue | De | Para | Até | Enquanto não chega |
 | --- | --- | --- | --- | --- |
-| Tabelas e contrato combinados | A | B e C | Dia 1 | Ninguém começa a integrar |
-| Usuário de teste e bucket | A | C | Dia 2 | C usa URL assinada gerada à mão |
-| Backend publicado | B | A e C | Dia 2 | Cada pessoa roda localmente |
-| Simulador no formato final | B | A e C | Dia 5 | C usa um JSON fixo |
-| Criação da análise pela API | A | B | Dia 6 | B insere linhas por script |
-| Resultado com IA real | B | C | Dia 11 | C segue com o simulador |
+| Projeto Supabase na nuvem | A | B e C | Dia 2 | Supabase local |
+| Lista de problemas do teste em aparelho | C | A e B | Dia 3 | Cada um testa no navegador ou no Expo Go |
+| IA real configurada na nuvem | B | A e C | Dia 5 | Simulador |
+| Loja de demonstração com dados | A | B e C | Dia 10 | Seed local |
+| APK instalável | C | Todos | Dia 11 | Expo Go |
 
 ## Etapas de execução
 
-O fluxo completo fica de pé no Dia 8 com IA simulada, e o MVP fecha no Dia 14. Os últimos seis dias servem para testar com produtos reais e preparar a entrega.
+Como o código já existe, as etapas agora validam, corrigem e estabilizam. A meta é ter o MVP funcionando por volta do Dia 13 e usar o resto para testar com produtos reais e preparar a entrega.
 
 | Etapa | Dias | Frente A | Frente B | Frente C | Marco |
 | --- | --- | --- | --- | --- | --- |
-| 0. Base | 1 e 2 | Banco, seed e contrato | Deploy e primeiro teste de IA | Expo, gravação e envio de teste | Vídeo no storage e IA respondendo |
-| 1. Fluxo simulado | 3 a 8 | Login, produtos e vídeos | Frames, worker e IA simulada | Login, catálogo e gravação | Fluxo completo com IA simulada |
-| 2. IA real e MVP | 9 a 14 | Correções e limite diário | IA real e validação | Resultado e primeiro APK | Fluxo principal funcionando |
-| 3. Teste real | 15 a 18 | Falhas e dados da demonstração | Ajuste de prompt e medição | Ajustes de uso e APK final | Demonstração funcionando |
+| 0. Validar | 1 e 2 | Nuvem e teste ponta a ponta | IA real com vídeo real | App no Android e no iPhone | Tudo rodando na nuvem |
+| 1. IA real | 3 a 8 | Correções de RPC e RLS | IA na nuvem e seleção de frames | Correções de telas | Fluxo completo com IA real |
+| 2. Estabilizar | 9 a 13 | Loja de demonstração | Ajuste de prompts | Primeiro APK e erros | MVP funcionando |
+| 3. Teste real | 14 a 18 | Correções finais | Medição de acerto e custo | Ajustes e APK final | Demonstração funcionando |
 | 4. Entrega | 19 e 20 | Arquitetura no relatório | Resultados de acerto | Vídeo de demonstração | Trabalho entregue com plano B |
 
 Os marcos servem para a equipe se situar. Se algo atrasar, ajustamos e seguimos.
 
-### Etapa 0: base (Dias 1 e 2)
+### Etapa 0: validar o que existe (Dias 1 e 2)
 
 | ID | Frente | Entrega | Depende de | Resultado esperado |
 | --- | --- | --- | --- | --- |
-| E0.1 | Todos | Fechar decisões, tabelas e contrato | Nenhuma | Responsáveis e rotas definidos no Dia 1 |
-| E0.2 | A | Repositório, Supabase, migrações e seed | E0.1 | Duas lojas e seus usuários existem |
-| E0.3 | B | Serviço publicado e teste de IA com vídeo real | E0.1 | `/health` no ar e IA devolve JSON válido |
-| E0.4 | C | App Expo gravando e enviando ao storage | E0.2 | Vídeo de 60 s sai de um Android e de um iPhone |
+| E0.1 | Todos | Apresentar o PR #1 e fechar as decisões em aberto | Nenhuma | Responsáveis definidos |
+| E0.2 | A | Criar o projeto na nuvem e repetir lá o teste de ponta a ponta | Nenhuma | Teste passa e nuvem no ar |
+| E0.3 | B | Rodar a IA real com um vídeo real | E0.2 | Sugestão válida e custo do vídeo medido |
+| E0.4 | C | Rodar o app no Android e no iPhone | E0.2 | Fluxo do gerente e do funcionário com o simulador |
+| E0.5 | A | CI no GitHub Actions | Nenhuma | Pull request roda os testes |
 
-### Etapa 1: fluxo completo com IA simulada (Dias 3 a 8)
-
-| ID | Frente | Entrega | Depende de | Resultado esperado |
-| --- | --- | --- | --- | --- |
-| E1.1 | A | Autenticação, tenant e repositório | E0.2 | Teste prova que uma loja não lê outra |
-| E1.2 | A | Upload assinado e produtos | E1.1 | Produto criado com fotos do storage |
-| E1.3 | A | Rotas de vídeo | E1.2 | Registrar vídeo cria uma análise |
-| E1.4 | B | Trazer regras e extração de frames do MVP web | E0.3 | Vídeo de cada aparelho gera frames corretos |
-| E1.5 | B | Worker com fila e simulador | E1.4 | Análise interrompida volta para a fila e termina |
-| E1.6 | C | Login, sessão e abas | E0.4 | Sessão continua ao reabrir o app |
-| E1.7 | C | Catálogo com fotos | E1.2 | Criar, listar e arquivar produto |
-| E1.8 | C | Gravar, escolher produtos, enviar e acompanhar | E0.4, E1.3 | Vídeo filmado chega ao estado final |
-
-**Marco do Dia 8:** o fluxo completo funciona no ambiente publicado, com IA simulada.
-
-### Etapa 2: IA real e MVP completo (Dias 9 a 14)
+### Etapa 1: IA real e correções (Dias 3 a 8)
 
 | ID | Frente | Entrega | Depende de | Resultado esperado |
 | --- | --- | --- | --- | --- |
-| E2.1 | B | Identificação e contagem com IA real | E1.5 | Resultado validado e salvo com evidência |
-| E2.2 | B | Testes das regras e registro de tokens | E2.1 | Regras cobertas no CI e custo visível |
-| E2.3 | A | Correções e nova análise | E1.3 | Correção guarda autor e preserva a sugestão |
-| E2.4 | A | Limite diário e erros padronizados | E1.3 | Excesso retorna 429 com mensagem clara |
-| E2.5 | C | Tela de resultado, correção e imagens | E1.8 | Conferência completa no aparelho |
-| E2.6 | C | Erros, permissões e sem conexão | E1.8 | Queda de rede não perde o vídeo |
-| E2.7 | C | Primeiro APK | E2.5 | Instalado em um Android sem ambiente de desenvolvimento |
+| E1.1 | C | Registrar os problemas do teste em aparelho | E0.4 | Lista priorizada |
+| E1.2 | B | Medir a seleção de frames em um celular simples | E0.4 | Tempo medido e otimizado se necessário |
+| E1.3 | B | IA real de ponta a ponta na nuvem | E0.3 | Análise completa sem estourar o tempo |
+| E1.4 | A | Corrigir problemas de RPC e RLS | E1.1 | Lista do backend resolvida |
+| E1.5 | C | Corrigir telas e erros | E1.1 | Lista do app resolvida |
+| E1.6 | A e C | Implementar a fila offline ou tirá-la da documentação | E0.1 | Código e documentação coerentes |
 
-**Marco do Dia 14:** o fluxo principal do MVP está funcionando. A partir daqui, a prioridade é estabilizar.
+**Marco do Dia 8:** o fluxo do gerente ao estoque funciona na nuvem com IA real.
 
-### Etapa 3: teste real e ajustes (Dias 15 a 18)
+### Etapa 2: estabilizar (Dias 9 a 13)
 
 | ID | Frente | Entrega | Depende de | Resultado esperado |
 | --- | --- | --- | --- | --- |
-| E3.1 | Todos | Gravar vídeos de produtos com contagem física | E2.7 | Pelo menos 10 vídeos registrados |
-| E3.2 | B | Ajustar prompt e medir acerto | E3.1 | Tabela de acerto e custo por vídeo |
-| E3.3 | A | Corrigir falhas e preparar dados da demonstração | E3.1 | Loja de demonstração pronta |
-| E3.4 | C | Ajustes de uso e APK final | E3.1 | APK final instalado nos aparelhos da apresentação |
+| E2.1 | A | Loja de demonstração na nuvem | E1.4 | Produtos, áreas e equipe prontos |
+| E2.2 | B | Ajustar prompts com vídeos reais | E1.3 | Menos itens marcados para revisão |
+| E2.3 | C | Primeiro APK | E1.5 | Instalado em um Android sem ambiente de desenvolvimento |
+| E2.4 | C | Erros, permissões e queda de conexão | E1.5 | Nenhuma tela sem saída |
 
-**Marco do Dia 18:** a demonstração completa está funcionando.
+**Marco do Dia 13:** o MVP está funcionando.
+
+### Etapa 3: teste real (Dias 14 a 18)
+
+| ID | Frente | Entrega | Depende de | Resultado esperado |
+| --- | --- | --- | --- | --- |
+| E3.1 | Todos | Gravar vídeos de produtos com contagem física | E2.3 | Pelo menos 10 vídeos registrados |
+| E3.2 | B | Medir acerto e custo | E3.1 | Tabela de acerto e custo por vídeo |
+| E3.3 | A | Corrigir falhas finais | E3.1 | Nenhuma falha grave aberta |
+| E3.4 | C | Ajustes de uso e APK final | E3.1 | APK final nos aparelhos da apresentação |
+
+**Marco do Dia 18:** a demonstração está funcionando.
 
 ### Etapa 4: entrega (Dias 19 e 20)
 
@@ -306,57 +272,51 @@ Os marcos servem para a equipe se situar. Se algo atrasar, ajustamos e seguimos.
 
 ## Cortes, riscos e evolução
 
-O escopo tem uma ordem de corte definida, para um atraso não comprometer o fluxo principal. A publicação nas lojas fica fora dos 20 dias, porque depende de contas, testadores e revisão externa.
+O PR #1 trouxe mais escopo que o MVP mínimo, então há o que cortar se o prazo apertar. A publicação nas lojas continua fora dos 20 dias.
 
 ### Se atrasar, cortar nesta ordem
 
-1. Botão de nova análise.
-2. Escolha de vídeo da galeria.
-3. Visualizador de imagens com zoom.
-4. Limite diário por loja, mantendo o limite de gastos no fornecedor.
-5. Demonstração no iPhone, ficando só com Android.
+1. Painel do gerente, mantendo só a lista de contagens.
+2. Recontagem pedida pelo gerente.
+3. Histórico de estoque por produto.
+4. Demonstração no iPhone, ficando só com Android.
 
-Login, separação por loja, gravação, análise e correção não entram em corte.
+Login, separação por loja, gravação, análise, conferência e aprovação não entram em corte.
 
 ### Riscos
 
 | Risco | Impacto | Resposta |
 | --- | --- | --- |
-| Acerto da IA ruim com produtos reais | Demonstração fraca | Testar já no Dia 2, medir na Etapa 3 e apresentar as limitações com dados |
-| Expo Go não atende no iPhone | Sem demonstração em iOS | Testar no Dia 2; se falhar, seguir só com Android |
-| Vídeo passa de 50 MB | Upload recusado | Bitrate e `maxFileSize` definidos na gravação |
-| Backend hiberna ou cai na apresentação | Demonstração interrompida | Abrir o serviço antes e ter vídeo gravado; backend local com túnel como reserva |
-| Build do APK atrasa | Sem app instalável | Gerar o primeiro APK até o Dia 14 |
-| Gasto inesperado com IA | Créditos acabam | Chave com limite de gastos e limite diário por loja |
-| Integrante indisponível por provas | Frente parada | Revisão cruzada e folga dos Dias 15 a 18 |
-| Vídeos captam pessoas | Exposição de dados pessoais | Filmar apenas produtos e prateleiras, sem rostos |
+| Acerto da IA ruim com produtos reais | Demonstração fraca | Testar na E0.3, medir na Etapa 3 e apresentar as limitações com dados |
+| Seleção de frames lenta em celular simples | Espera longa antes da análise | Medir na E1.2 e reduzir candidatos se preciso |
+| Edge Function estoura o tempo com a IA real | Análise falha | Cada etapa já roda em invocação própria; validar na E1.3 |
+| Limites do plano Free do Supabase | Serviço interrompido | Acompanhar o uso no painel do projeto |
+| Documentação diferente do código | Decisões erradas | Revisar `arquitetura.md` na E0.1 |
+| Expo Go não atende no iPhone | Sem demonstração em iOS | Testar na E0.4; se falhar, seguir só com Android |
+| Gasto inesperado com IA | Créditos acabam | Chave com limite de gastos |
+| Vídeos captam pessoas | Exposição de dados pessoais | Filmar apenas produtos e prateleiras |
 
 ### Evolução depois do MVP
-
-A arquitetura permite adicionar cada item sem refazer o que foi entregue.
 
 | Item | No MVP | Evolução |
 | --- | --- | --- |
 | Lojas | APK e Expo Go | [App Store](https://developer.apple.com/support/enrollment/) e Google Play, com contas de organização |
 | Consentimento de IA | Aviso aos participantes | Tela obrigatória, exigida pela regra [5.1.2(i)](https://developer.apple.com/app-store/review/guidelines/) da Apple |
-| Exclusão de conta | Por script | Opção dentro do app, para a regra 5.1.1(v) |
+| Exclusão de conta | Não existe no app | Opção no app, exigida pela regra 5.1.1(v) porque o gerente cria conta pelo app |
 | Testes do Google Play | Não usados | Conta pessoal exige [12 testadores por 14 dias](https://support.google.com/googleplay/android-developer/answer/14151465); app novo precisa de [target API 36](https://developer.android.com/google/play/requirements/target-sdk) |
-| Usuários | Seed e uma loja por usuário | Convites, papéis e várias lojas |
-| Isolamento | Filtro único na API | Políticas de RLS por tenant |
-| Upload | Arquivo inteiro até 50 MB | [TUS retomável](https://supabase.com/docs/guides/storage/uploads/resumable-uploads) e plano Pro |
-| Worker | Thread no serviço | Serviço separado e várias instâncias |
+| Fila offline | Não implementada | Envio com repetição automática quando a conexão voltar |
 | Câmera | expo-camera | [VisionCamera](https://visioncamera.margelo.com/docs/visioncamera-vs-expo-camera), se HDR ou FPS atrapalharem |
-| Operação | Um ambiente | Staging, alertas, backups e custo por loja |
+| Operação | Um ambiente | Staging, alertas e backups |
 
 ### Pendências a validar
 
-- Falta definir qual data é o Dia 1 e confirmar se a entrega cai no Dia 20.
-- No iPhone, o bitrate do `expo-camera` só vale com codec definido. Verificar na E0.4.
-- Não está confirmado se gravar sem áudio evita pedir permissão de microfone no iPhone.
+- Falta definir qual data é o Dia 1.
+- O teste de ponta a ponta só rodou com a IA simulada; falta repetir com a IA real.
+- Decidir se a fila offline entra no MVP.
 - Confirmar se o projeto Free do Supabase pausa por inatividade e abri-lo antes da apresentação.
-- O custo por vídeo ainda é estimativa e deve ser medido na E3.2.
+- O custo por vídeo ainda é estimativa e deve ser medido na E0.3.
 - As regras da Apple foram lidas em resumo. Conferir o texto oficial antes de publicar.
 
 ### Fontes
 
-Consultadas em novembro de 2026: [Expo SDK 58](https://expo.dev/changelog/sdk-58), [expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/), [VisionCamera vs Expo Camera](https://visioncamera.margelo.com/docs/visioncamera-vs-expo-camera), [expo-file-system](https://docs.expo.dev/versions/latest/sdk/filesystem/), [expo-secure-store](https://docs.expo.dev/versions/latest/sdk/securestore/), [chaves de assinatura do Supabase](https://supabase.com/docs/guides/auth/signing-keys), [upload retomável do Supabase](https://supabase.com/docs/guides/storage/uploads/resumable-uploads), [limites de arquivo do Supabase](https://supabase.com/docs/guides/storage/uploads/file-limits), [regras da App Store](https://developer.apple.com/app-store/review/guidelines/), [inscrição na Apple](https://developer.apple.com/support/enrollment/), [target API do Google Play](https://developer.android.com/google/play/requirements/target-sdk) e [testes em contas pessoais do Google Play](https://support.google.com/googleplay/android-developer/answer/14151465).
+Consultadas em novembro de 2026: [Expo SDK 58](https://expo.dev/changelog/sdk-58), [expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/), [VisionCamera vs Expo Camera](https://visioncamera.margelo.com/docs/visioncamera-vs-expo-camera), [chaves de assinatura do Supabase](https://supabase.com/docs/guides/auth/signing-keys), [limites de arquivo do Supabase](https://supabase.com/docs/guides/storage/uploads/file-limits), [regras da App Store](https://developer.apple.com/app-store/review/guidelines/), [inscrição na Apple](https://developer.apple.com/support/enrollment/), [target API do Google Play](https://developer.android.com/google/play/requirements/target-sdk) e [testes em contas pessoais do Google Play](https://support.google.com/googleplay/android-developer/answer/14151465).

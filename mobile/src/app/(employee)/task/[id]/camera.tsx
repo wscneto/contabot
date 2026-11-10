@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -26,8 +26,9 @@ export default function CameraRecorderScreen() {
   const maxDuration = config?.max_video_seconds || 60;
 
   const cameraRef = useRef<CameraView>(null);
+  // A análise usa só imagens: a câmera grava sem áudio (prop mute) e o app não
+  // pede permissão de microfone nem capta conversas na loja.
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [micPermission, requestMicPermission] = useMicrophonePermissions();
 
   const [torch, setTorch] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -146,10 +147,7 @@ export default function CameraRecorderScreen() {
         </Text>
         <Button
           title="Permitir Acesso à Câmera"
-          onPress={async () => {
-            await requestCameraPermission();
-            await requestMicPermission();
-          }}
+          onPress={requestCameraPermission}
           size="lg"
           style={styles.permissionBtn}
         />
@@ -172,6 +170,7 @@ export default function CameraRecorderScreen() {
           style={styles.camera}
           facing="back"
           mode="video"
+          mute
           enableTorch={torch}
         >
           {/* Top Bar with Guidelines & Torch */}
