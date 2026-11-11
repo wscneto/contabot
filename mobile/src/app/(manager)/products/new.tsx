@@ -130,6 +130,21 @@ export default function NewProductScreen() {
       <Header title="Cadastrar Produto" showBack />
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Import Banner Shortcut */}
+        <TouchableOpacity
+          style={styles.importBanner}
+          onPress={() => router.replace('/(manager)/products/import')}
+        >
+          <Ionicons name="cloud-upload-outline" size={20} color={colors.primary} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.importBannerTitle}>Prefere cadastrar em lote?</Text>
+            <Text style={styles.importBannerSubtitle}>
+              Importe uma planilha (.csv ou .xlsx) com seus produtos
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+        </TouchableOpacity>
+
         {/* Photo Upload Section */}
         <Text style={styles.sectionHeading}>Fotos de Referência da Embalagem *</Text>
         <Text style={styles.sectionSubtitle}>
@@ -285,5 +300,26 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     marginTop: 6,
+  },
+  importBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorderStrong,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+  },
+  importBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  importBannerSubtitle: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
   },
 });

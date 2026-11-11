@@ -16,12 +16,14 @@ import { api } from '../../../services/api';
 import { Header } from '../../../components/Header';
 import { Card } from '../../../components/Card';
 import { Input } from '../../../components/Input';
+import { Button } from '../../../components/Button';
 import { colors, typography } from '../../../constants/theme';
 
 export default function ManagerProductsScreen() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
+  const [filterPendingPhotos, setFilterPendingPhotos] = useState(false);
 
   const { data: products = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['manager_products'],
@@ -34,48 +36,81 @@ export default function ManagerProductsScreen() {
       (p.variant && p.variant.toLowerCase().includes(search.toLowerCase())) ||
       (p.barcode && p.barcode.includes(search));
     const matchesLow = filterLowStock ? p.low_stock : true;
-    return matchesSearch && matchesLow;
+    const isPending = !p.photos || p.photos.length === 0;
+    const matchesPending = filterPendingPhotos ? isPending : true;
+    return matchesSearch && matchesLow && matchesPending;
   });
+
+  const pendingPhotosCount = products.filter((p: any) => !p.photos || p.photos.length === 0).length;
 
   const renderItem = ({ item }: { item: any }) => {
     const photoUrl = api.resolveMediaUrl(item.photos?.[0]);
+    const isPendingPhotos = !item.photos || item.photos.length === 0;
 
     return (
-      <Card style={styles.card}>
+      <Card
+        style={[styles.card, isPendingPhotos && styles.cardPending]}
+        onPress={() => router.push(`/(manager)/products/${item.id}`)}
+      >
         <View style={styles.cardRow}>
           {photoUrl ? (
             <Image source={{ uri: photoUrl }} style={styles.thumb} contentFit="cover" />
           ) : (
-            <View style={styles.thumbEmpty}>
-              <Ionicons name="cube-outline" size={24} color={colors.textMuted} />
+            <View style={[styles.thumbEmpty, isPendingPhotos && styles.thumbEmptyWarning]}>
+              <Ionicons
+                name={isPendingPhotos ? 'camera-outline' : 'cube-outline'}
+                size={24}
+                color={isPendingPhotos ? colors.warningText : colors.textMuted}
+              />
             </View>
           )}
 
           <View style={styles.infoCol}>
-            <Text style={styles.name}>{item.name}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{item.name}</Text>
+            </View>
+
             {item.variant ? <Text style={styles.variant}>{item.variant}</Text> : null}
             {item.barcode ? (
               <Text style={styles.barcode}>EAN: {item.barcode}</Text>
             ) : null}
 
-            <View style={styles.stockRow}>
-              <Text style={styles.stockText}>
-                Estoque:{' '}
-                <Text style={[styles.bold, item.low_stock && { color: colors.danger }]}>
-                  {item.stock !== null ? `${item.stock} un.` : 'Não contado'}
+            {isPendingPhotos ? (
+              <View style={styles.pendingNoticeRow}>
+                <Ionicons name="alert-circle-outline" size={13} color={colors.warningText} />
+                <Text style={styles.pendingNoticeText}>Foto pendente · Toque para fotografar</Text>
+              </View>
+            ) : (
+              <View style={styles.stockRow}>
+                <Text style={styles.stockText}>
+                  Estoque:{' '}
+                  <Text style={[styles.bold, item.low_stock && { color: colors.danger }]}>
+                    {item.stock !== null ? `${item.stock} un.` : 'Não contado'}
+                  </Text>
                 </Text>
-              </Text>
-              {item.min_stock !== null && (
-                <Text style={styles.minStockText}>· Mín: {item.min_stock}</Text>
-              )}
-            </View>
+                {item.min_stock !== null && (
+                  <Text style={styles.minStockText}>· Mín: {item.min_stock}</Text>
+                )}
+              </View>
+            )}
           </View>
 
-          {item.low_stock && (
-            <View style={styles.lowStockBadge}>
-              <Text style={styles.lowStockBadgeText}>Baixo</Text>
-            </View>
-          )}
+          <View style={styles.badgesCol}>
+            {isPendingPhotos && (
+              <View style={styles.pendingBadge}>
+                <Ionicons name="camera-outline" size={12} color={colors.warningText} />
+                <Text style={styles.pendingBadgeText}>Sem foto</Text>
+              </View>
+            )}
+
+            {item.low_stock && (
+              <View style={styles.lowStockBadge}>
+                <Text style={styles.lowStockBadgeText}>Baixo</Text>
+              </View>
+            )}
+
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginTop: 4 }} />
+          </View>
         </View>
       </Card>
     );
@@ -86,12 +121,23 @@ export default function ManagerProductsScreen() {
       <Header
         title="Catálogo de Produtos"
         rightAction={
-          <TouchableOpacity
-            style={styles.headerBtn}
-            onPress={() => router.push('/(manager)/products/new')}
-          >
-            <Ionicons name="add" size={24} color={colors.primary} />
-          </TouchableOpacity>
+          <View style={styles.headerActionsRow}>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => router.push('/(manager)/products/import')}
+              accessibilityLabel="Importar por planilha"
+            >
+              <Ionicons name="cloud-upload-outline" size={22} color={colors.primary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => router.push('/(manager)/products/new')}
+              accessibilityLabel="Cadastrar produto manualmente"
+            >
+              <Ionicons name="add" size={26} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -101,22 +147,48 @@ export default function ManagerProductsScreen() {
           value={search}
           onChangeText={setSearch}
           leftIcon={<Ionicons name="search-outline" size={18} color={colors.textMuted} />}
-          containerStyle={{ marginBottom: 8 }}
+          containerStyle={{ marginBottom: 10 }}
         />
 
-        <TouchableOpacity
-          style={[styles.filterChip, filterLowStock && styles.filterChipActive]}
-          onPress={() => setFilterLowStock(!filterLowStock)}
-        >
-          <Ionicons
-            name="warning-outline"
-            size={14}
-            color={filterLowStock ? '#FFF' : colors.warningText}
-          />
-          <Text style={[styles.filterChipText, filterLowStock && styles.filterChipTextActive]}>
-            Apenas estoque baixo
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.filterChipsRow}>
+          <TouchableOpacity
+            style={[styles.filterChip, filterLowStock && styles.filterChipActive]}
+            onPress={() => setFilterLowStock(!filterLowStock)}
+          >
+            <Ionicons
+              name="warning-outline"
+              size={13}
+              color={filterLowStock ? '#FFF' : colors.warningText}
+            />
+            <Text style={[styles.filterChipText, filterLowStock && styles.filterChipTextActive]}>
+              Estoque baixo
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              filterPendingPhotos && styles.filterChipPendingActive,
+              pendingPhotosCount > 0 && !filterPendingPhotos && styles.filterChipPendingAlert,
+            ]}
+            onPress={() => setFilterPendingPhotos(!filterPendingPhotos)}
+          >
+            <Ionicons
+              name="camera-outline"
+              size={13}
+              color={filterPendingPhotos ? '#FFF' : colors.warningText}
+            />
+            <Text
+              style={[
+                styles.filterChipText,
+                filterPendingPhotos && styles.filterChipTextActive,
+                pendingPhotosCount > 0 && !filterPendingPhotos && { color: colors.warningText },
+              ]}
+            >
+              Fotos pendentes {pendingPhotosCount > 0 ? `(${pendingPhotosCount})` : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -139,8 +211,22 @@ export default function ManagerProductsScreen() {
               <Ionicons name="cube-outline" size={48} color={colors.textMuted} />
               <Text style={styles.emptyTitle}>Nenhum produto encontrado</Text>
               <Text style={styles.emptySubtitle}>
-                Toque no botão "+" acima para cadastrar seu primeiro produto com fotos da embalagem.
+                Cadastre um produto manualmente ou importe uma planilha com seus itens.
               </Text>
+
+              <View style={styles.emptyActionsRow}>
+                <Button
+                  title="Importar Planilha (.csv/.xlsx)"
+                  size="sm"
+                  variant="outline"
+                  onPress={() => router.push('/(manager)/products/import')}
+                />
+                <Button
+                  title="Cadastrar Manualmente"
+                  size="sm"
+                  onPress={() => router.push('/(manager)/products/new')}
+                />
+              </View>
             </View>
           ) : undefined
         }
@@ -154,6 +240,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   headerBtn: {
     padding: 6,
   },
@@ -165,26 +256,37 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.surfaceBorder,
     paddingBottom: 10,
   },
+  filterChipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: colors.warningBg,
+    backgroundColor: colors.surfaceSubtle,
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 14,
     gap: 4,
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: colors.surfaceBorderStrong,
   },
   filterChipActive: {
     backgroundColor: colors.warning,
     borderColor: colors.warning,
   },
+  filterChipPendingAlert: {
+    backgroundColor: colors.warningBg,
+    borderColor: '#FDE68A',
+  },
+  filterChipPendingActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
   filterChipText: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.warningText,
+    color: colors.textSecondary,
   },
   filterChipTextActive: {
     color: '#FFF',
@@ -196,6 +298,9 @@ const styles = StyleSheet.create({
   card: {
     padding: 14,
     marginBottom: 10,
+  },
+  cardPending: {
+    borderColor: '#FDE68A',
   },
   cardRow: {
     flexDirection: 'row',
@@ -216,8 +321,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+  thumbEmptyWarning: {
+    backgroundColor: colors.warningBg,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
   infoCol: {
     flex: 1,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   name: {
     fontSize: 15,
@@ -252,22 +366,54 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginLeft: 4,
   },
+  pendingNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  pendingNoticeText: {
+    fontSize: 11,
+    color: colors.warningText,
+    fontWeight: '600',
+  },
+  badgesCol: {
+    alignItems: 'flex-end',
+    gap: 4,
+    marginLeft: 8,
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.warningBg,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  pendingBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.warningText,
+  },
   lowStockBadge: {
     backgroundColor: colors.dangerBg,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: '#FECACA',
   },
   lowStockBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: colors.dangerText,
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 50,
     paddingHorizontal: 20,
   },
   emptyTitle: {
@@ -279,5 +425,12 @@ const styles = StyleSheet.create({
     ...typography.body,
     textAlign: 'center',
     color: colors.textMuted,
+    marginBottom: 20,
+  },
+  emptyActionsRow: {
+    flexDirection: 'column',
+    gap: 10,
+    width: '100%',
+    maxWidth: 280,
   },
 });
