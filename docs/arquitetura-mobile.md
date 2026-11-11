@@ -179,7 +179,7 @@ contabot/
 - **Branches:** curtas, saindo da `main`, com pull request revisado por outra pessoa.
 - **Banco:** toda alteração entra por migração em `supabase/migrations`.
 - **Segredos:** chaves só nos segredos do Supabase e em `.env` locais, nunca no repositório.
-- **Testes:** `deno test` nas funções e `npx tsc --noEmit` no app. Ainda não há CI.
+- **Testes:** `deno test` nas funções e `pnpm exec tsc --noEmit` no app. Ainda não há CI.
 - **Alinhamento:** 15 minutos por dia e demonstração nos Dias 2, 8, 13 e 18.
 
 ## Três frentes de trabalho

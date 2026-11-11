@@ -50,36 +50,36 @@ contabot/
 
 ### Pré-requisitos
 - Docker (para o Supabase local)
-- Node.js 18+ (a CLI roda via `npx supabase`)
+- Node.js 18+ e [pnpm](https://pnpm.io/) (a CLI do Supabase roda via `pnpm dlx supabase`)
 - [Deno](https://deno.com/) 2+ (seed e testes)
 
 ### 1. Subir o Supabase local e aplicar as migrations
 ```bash
-npx supabase start          # primeira vez baixa as imagens Docker
-npx supabase db reset       # recria o banco com supabase/migrations
-npx supabase status         # mostra API_URL, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, Studio...
+pnpm dlx supabase start          # primeira vez baixa as imagens Docker
+pnpm dlx supabase db reset       # recria o banco com supabase/migrations
+pnpm dlx supabase status         # mostra API_URL, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, Studio...
 ```
 
 ### 2. Popular dados de demonstração
 Cria o *Mercadinho Bom Preço* com gerente, 2 funcionários, produtos com fotos, gôndolas e contagens em vários estados:
 ```bash
-eval "$(npx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=')"
+eval "$(pnpm dlx supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=')"
 SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY deno run -A supabase/scripts/seed-demo.ts
 ```
 
 ### 3. Configurar o modelo de visão e servir as Edge Functions
 ```bash
 cp supabase/functions/.env.example supabase/functions/.env   # VISION_PROVIDER=mock por padrão
-npx supabase functions serve --env-file supabase/functions/.env
+pnpm dlx supabase functions serve --env-file supabase/functions/.env
 ```
 O provedor é configurado só por variáveis `VISION_*` (detalhes em `supabase/functions/.env.example`). Use `VISION_PROVIDER=chat` com qualquer API compatível com **OpenAI Chat Completions** (OpenAI, Gemini, OpenRouter, DeepInfra, Groq, vLLM...) ou `mock` para demonstração sem modelo. A chave fica só no servidor, nunca no app.
 
 ### 4. Projeto na nuvem (recomendado para testar no celular)
 ```bash
-npx supabase link --project-ref <ref-do-projeto>
-npx supabase db push
-npx supabase functions deploy analyze-capture create-employee join-store
-npx supabase secrets set --env-file supabase/functions/.env
+pnpm dlx supabase link --project-ref <ref-do-projeto>
+pnpm dlx supabase db push
+pnpm dlx supabase functions deploy analyze-capture create-employee join-store
+pnpm dlx supabase secrets set --env-file supabase/functions/.env
 ```
 No painel do projeto, em *Authentication → Sign In / Providers → Email*, desligue **Confirm email** para o gerente entrar logo após o cadastro. Se ficar ligado, o app pede a confirmação do e-mail antes do primeiro login.
 
@@ -93,22 +93,22 @@ No painel do projeto, em *Authentication → Sign In / Providers → Email*, des
 ### 1. Instalar dependências e configurar o Supabase
 ```bash
 cd mobile
-npm install
+pnpm install
 cp .env.example .env
 ```
 Preencha `EXPO_PUBLIC_SUPABASE_URL` e `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`:
 - **Projeto cloud**: `https://<ref>.supabase.co` e a *publishable key* do painel. Funciona em qualquer rede.
-- **Supabase local**: `http://IP_DO_SEU_PC:54321` e a `PUBLISHABLE_KEY` de `npx supabase status`. O celular precisa alcançar a porta 54321 do PC: mesma rede Wi-Fi, sem isolamento de clientes, e porta liberada no firewall (`sudo ufw allow 54321/tcp`). `127.0.0.1` só funciona no navegador do próprio PC.
+- **Supabase local**: `http://IP_DO_SEU_PC:54321` e a `PUBLISHABLE_KEY` de `pnpm dlx supabase status`. O celular precisa alcançar a porta 54321 do PC: mesma rede Wi-Fi, sem isolamento de clientes, e porta liberada no firewall (`sudo ufw allow 54321/tcp`). `127.0.0.1` só funciona no navegador do próprio PC.
 
 ### 2. Iniciar o Metro Bundler / Expo
 ```bash
-npx expo start --tunnel ngrok
+pnpm expo start --tunnel ngrok
 ```
 Este é o comando padrão do projeto. O túnel via ngrok faz o celular se conectar ao Metro pela internet, sem depender da rede local. Assim, firewall do PC (ex.: `ufw`) e isolamento de clientes em Wi-Fi de universidade ou de convidados não atrapalham. Usar `ngrok` explicitamente evita o túnel padrão do Expo, que exige login em uma conta Expo.
 
 - Para testar no celular físico: abra o app **Expo Go** e escaneie o QR Code exibido no terminal.
 - O túnel cobre só o Metro. O acesso ao Supabase segue o endereço configurado no passo 1.
-- Alternativa sem túnel (`npm start`): só funciona se o celular e o computador estiverem na mesma rede Wi-Fi e a porta `8081` estiver liberada no firewall.
+- Alternativa sem túnel (`pnpm start`): só funciona se o celular e o computador estiverem na mesma rede Wi-Fi e a porta `8081` estiver liberada no firewall.
 
 ---
 
@@ -156,7 +156,7 @@ cd supabase/functions && deno test tests/
 
 ### Teste de ponta a ponta (Supabase local + Edge Functions com `VISION_PROVIDER=mock`)
 ```bash
-eval "$(npx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
+eval "$(pnpm dlx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
 SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
   deno test -A supabase/tests/integration.test.ts
 ```
@@ -164,7 +164,7 @@ SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SER
 
 ### Checagem de tipos do mobile
 ```bash
-cd mobile && npx tsc --noEmit
+cd mobile && pnpm exec tsc --noEmit
 ```
 
 ---

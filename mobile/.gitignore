@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# O projeto usa pnpm (pnpm-lock.yaml); lockfiles de outros gerenciadores não entram.
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb

@@ -2,8 +2,8 @@
  * Teste de ponta a ponta contra o Supabase local (banco + storage + Edge Functions).
  *
  * Pré-requisitos:
- *   npx supabase start
- *   npx supabase functions serve --env-file supabase/functions/.env   (VISION_PROVIDER=mock)
+ *   pnpm dlx supabase start
+ *   pnpm dlx supabase functions serve --env-file supabase/functions/.env   (VISION_PROVIDER=mock)
  *
  * Execução:
  *   SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
