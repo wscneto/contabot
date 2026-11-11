@@ -19,6 +19,7 @@ import { Header } from '../../../components/Header';
 import { Input } from '../../../components/Input';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { showMessage } from '../../../utils/confirm';
 import { colors, typography } from '../../../constants/theme';
 
 export default function NewProductScreen() {
@@ -35,14 +36,14 @@ export default function NewProductScreen() {
 
   const handlePickFromGallery = async () => {
     if (photoUris.length >= 4) {
-      Alert.alert('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
+      showMessage('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
       return;
     }
 
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permissão necessária', 'Permita o acesso à galeria de fotos.');
+        showMessage('Permissão necessária', 'Permita o acesso à galeria de fotos.');
         return;
       }
 
@@ -58,20 +59,20 @@ export default function NewProductScreen() {
         setPhotoUris((prev) => [...prev, ...newUris].slice(0, 4));
       }
     } catch (e: any) {
-      Alert.alert('Erro ao selecionar fotos', e.message);
+      showMessage('Erro ao selecionar fotos', e.message);
     }
   };
 
   const handleTakePhoto = async () => {
     if (photoUris.length >= 4) {
-      Alert.alert('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
+      showMessage('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
       return;
     }
 
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permissão necessária', 'Permita o acesso à câmera para fotografar a embalagem.');
+        showMessage('Permissão necessária', 'Permita o acesso à câmera para fotografar a embalagem.');
         return;
       }
 
@@ -83,7 +84,7 @@ export default function NewProductScreen() {
         setPhotoUris((prev) => [...prev, result.assets[0].uri].slice(0, 4));
       }
     } catch (e: any) {
-      Alert.alert('Erro ao abrir câmera', e.message);
+      showMessage('Erro ao abrir câmera', e.message);
     }
   };
 
@@ -93,11 +94,11 @@ export default function NewProductScreen() {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      Alert.alert('Atenção', 'Informe o nome do produto.');
+      showMessage('Atenção', 'Informe o nome do produto.');
       return;
     }
     if (photoUris.length === 0) {
-      Alert.alert('Foto obrigatória', 'Envie pelo menos 1 foto nítida da embalagem para a IA reconhecer o produto.');
+      showMessage('Foto obrigatória', 'Envie pelo menos 1 foto nítida da embalagem para a IA reconhecer o produto.');
       return;
     }
 
@@ -119,7 +120,7 @@ export default function NewProductScreen() {
       queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
       router.back();
     } catch (err: any) {
-      Alert.alert('Erro ao salvar produto', err.message || 'Falha ao salvar produto.');
+      showMessage('Erro ao salvar produto', err.message || 'Falha ao salvar produto.');
     } finally {
       setSaving(false);
     }

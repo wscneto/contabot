@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
   FlatList,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import { api, ImportProductItem } from '../../../services/api';
 import { Header } from '../../../components/Header';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { showMessage } from '../../../utils/confirm';
 import { colors, typography } from '../../../constants/theme';
 
 export default function ImportProductsScreen() {
@@ -30,11 +32,26 @@ export default function ImportProductsScreen() {
   const [parsedItems, setParsedItems] = useState<ImportProductItem[]>([]);
   const [loadingFile, setLoadingFile] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const parseSheetRows = (rawRows: any[][]): ImportProductItem[] => {
     if (!rawRows || rawRows.length === 0) return [];
 
-    const headerRow = rawRows[0] || [];
+    // Localiza a linha do cabeçalho nas primeiras 5 linhas que contenham palavras-chave
+    let headerRowIdx = 0;
+    for (let r = 0; r < Math.min(rawRows.length, 5); r++) {
+      const row = rawRows[r] || [];
+      const hasKeywords = row.some((col: any) => {
+        const str = String(col || '').toLowerCase().trim();
+        return /descri|nome|produto|product|barcode|barra|ean|sap/i.test(str);
+      });
+      if (hasKeywords) {
+        headerRowIdx = r;
+        break;
+      }
+    }
+
+    const headerRow = rawRows[headerRowIdx] || [];
     let nameIdx = -1;
     let variantIdx = -1;
     let barcodeIdx = -1;
@@ -82,7 +99,7 @@ export default function ImportProductsScreen() {
       }
     });
 
-    let startRow = 1;
+    let startRow = headerRowIdx + 1;
     if (nameIdx === -1) {
       nameIdx = 0;
       startRow = 0;
@@ -94,6 +111,12 @@ export default function ImportProductsScreen() {
       if (!row || row.length === 0) continue;
       const rawName = row[nameIdx] !== undefined ? String(row[nameIdx]).trim() : '';
       if (!rawName) continue;
+
+      // Ignora se o nome for idêntico ao rótulo do cabeçalho
+      const lowerName = rawName.toLowerCase();
+      if (lowerName === 'descrição' || lowerName === 'descricao' || lowerName === 'nome' || lowerName === 'produto') {
+        continue;
+      }
 
       const rawVariant =
         variantIdx !== -1 && row[variantIdx] !== undefined ? String(row[variantIdx]).trim() : '';
@@ -116,6 +139,7 @@ export default function ImportProductsScreen() {
   };
 
   const handlePickFile = async () => {
+    setError(null);
     try {
       setLoadingFile(true);
       const res = await DocumentPicker.getDocumentAsync({
@@ -135,54 +159,98 @@ export default function ImportProductsScreen() {
       }
 
       const asset = res.assets[0];
-      setFileName(asset.name);
-      setFileSize(asset.size ?? null);
 
-      // Ler conteúdo como base64
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: 'base64',
-      });
+      let workbook: XLSX.WorkBook;
 
-      const workbook = XLSX.read(base64, { type: 'base64' });
+      if (Platform.OS === 'web') {
+        // No navegador web, lê o ArrayBuffer diretamente do File ou do blob URI
+        let arrayBuffer: ArrayBuffer;
+        if ((asset as any).file && typeof (asset as any).file.arrayBuffer === 'function') {
+          arrayBuffer = await (asset as any).file.arrayBuffer();
+        } else {
+          const fetchRes = await fetch(asset.uri);
+          arrayBuffer = await fetchRes.arrayBuffer();
+        }
+        workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+      } else {
+        // No ambiente mobile nativo (Android / iOS)
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: 'base64',
+        });
+        workbook = XLSX.read(base64, { type: 'base64' });
+      }
+
       if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
         throw new Error('Nenhuma planilha encontrada no arquivo selecionado.');
       }
 
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<any[]>(firstSheet, { header: 1 });
+      // Procura a primeira aba com linhas
+      let targetSheet = workbook.Sheets[workbook.SheetNames[0]];
+      let rawRows = XLSX.utils.sheet_to_json<any[]>(targetSheet, { header: 1 });
+
+      if ((!rawRows || rawRows.length === 0) && workbook.SheetNames.length > 1) {
+        for (let s = 1; s < workbook.SheetNames.length; s++) {
+          const sheet = workbook.Sheets[workbook.SheetNames[s]];
+          const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+          if (rows && rows.length > 0) {
+            targetSheet = sheet;
+            rawRows = rows;
+            break;
+          }
+        }
+      }
+
       const items = parseSheetRows(rawRows);
 
       if (items.length === 0) {
         throw new Error('Nenhum produto válido foi identificado nas linhas do arquivo.');
       }
 
+      setFileName(asset.name);
+      setFileSize(asset.size ?? null);
       setParsedItems(items);
     } catch (err: any) {
-      Alert.alert('Erro ao ler arquivo', err.message || 'Falha ao processar o arquivo.');
+      console.error('[ImportProducts] Erro ao ler arquivo:', err);
+      const msg = err.message || 'Falha ao processar o arquivo.';
+      setError(msg);
+      setFileName(null);
+      setFileSize(null);
+      setParsedItems([]);
+      showMessage('Erro ao ler arquivo', msg);
     } finally {
       setLoadingFile(false);
     }
   };
 
+  const handleClearFile = () => {
+    setFileName(null);
+    setFileSize(null);
+    setParsedItems([]);
+    setError(null);
+  };
+
   const handleConfirmImport = async () => {
     if (parsedItems.length === 0) {
-      Alert.alert('Atenção', 'Selecione um arquivo com ao menos um produto válido.');
+      showMessage('Atenção', 'Selecione um arquivo com ao menos um produto válido.');
       return;
     }
 
     setImporting(true);
+    setError(null);
     try {
       const res = await api.importProducts(parsedItems);
       queryClient.invalidateQueries({ queryKey: ['manager_products'] });
       queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
 
-      Alert.alert(
+      showMessage(
         'Importação Concluída',
         `${res.count} produtos foram cadastrados no catálogo!\n\nEles estão marcados como "Foto pendente". Adicione fotos da embalagem a qualquer momento para que a IA possa reconhecê-los nas contagens.`,
-        [{ text: 'OK', onPress: () => router.back() }]
+        () => router.back()
       );
     } catch (err: any) {
-      Alert.alert('Erro na importação', err.message || 'Falha ao cadastrar produtos em lote.');
+      const msg = err.message || 'Falha ao cadastrar produtos em lote.';
+      setError(msg);
+      showMessage('Erro na importação', msg);
     } finally {
       setImporting(false);
     }
@@ -200,13 +268,13 @@ export default function ImportProductsScreen() {
             <Text style={styles.infoTitle}>Como funciona a importação</Text>
           </View>
           <Text style={styles.infoText}>
-            Envie uma planilha <Text style={styles.bold}>Excel (.xlsx)</Text> ou arquivo{' '}
+            Envie uma planilha <Text style={styles.bold}>Excel (.xlsx/.xls)</Text> ou arquivo{' '}
             <Text style={styles.bold}>CSV (.csv)</Text> contendo os nomes dos produtos.
           </Text>
           <View style={styles.ruleItem}>
             <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
             <Text style={styles.ruleText}>
-              <Text style={styles.bold}>Coluna de Nomes:</Text> Obrigatória (ex: "Nome", "Produto").
+              <Text style={styles.bold}>Coluna de Nomes:</Text> Obrigatória (ex: "Nome", "Descrição", "Produto").
             </Text>
           </View>
           <View style={styles.ruleItem}>
@@ -225,25 +293,46 @@ export default function ImportProductsScreen() {
           </View>
         </Card>
 
+        {/* Error Banner */}
+        {error && (
+          <Card style={styles.errorCard}>
+            <View style={styles.errorHeader}>
+              <Ionicons name="alert-circle-outline" size={20} color={colors.danger} />
+              <Text style={styles.errorTitle}>Erro ao processar arquivo</Text>
+            </View>
+            <Text style={styles.errorText}>{error}</Text>
+          </Card>
+        )}
+
         {/* File Picker Section */}
         <TouchableOpacity
-          style={styles.pickerBox}
+          style={[styles.pickerBox, fileName && styles.pickerBoxSelected]}
           onPress={handlePickFile}
           disabled={loadingFile || importing}
         >
-          <Ionicons
-            name={fileName ? 'document-attach' : 'cloud-upload-outline'}
-            size={36}
-            color={fileName ? colors.success : colors.primary}
-          />
-          <Text style={styles.pickerTitle}>
-            {fileName ? fileName : 'Selecionar Planilha (.csv ou .xlsx)'}
-          </Text>
-          <Text style={styles.pickerSubtitle}>
-            {fileSize
-              ? `${(fileSize / 1024).toFixed(1)} KB · Toque para trocar de arquivo`
-              : 'Toque para buscar no seu dispositivo'}
-          </Text>
+          {loadingFile ? (
+            <>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.pickerTitle}>Lendo planilha...</Text>
+              <Text style={styles.pickerSubtitle}>Processando linhas e colunas</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons
+                name={fileName ? 'document-attach' : 'cloud-upload-outline'}
+                size={36}
+                color={fileName ? colors.success : colors.primary}
+              />
+              <Text style={styles.pickerTitle}>
+                {fileName ? fileName : 'Selecionar Planilha (.csv, .xlsx ou .xls)'}
+              </Text>
+              <Text style={styles.pickerSubtitle}>
+                {fileSize
+                  ? `${(fileSize / 1024).toFixed(1)} KB · Toque para trocar de arquivo`
+                  : 'Toque para buscar no seu dispositivo'}
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
 
         {/* Parsed List Preview */}
@@ -253,10 +342,10 @@ export default function ImportProductsScreen() {
               <Text style={styles.previewSectionTitle}>
                 Produtos Encontrados ({parsedItems.length})
               </Text>
-              <View style={styles.pendingBadge}>
-                <Ionicons name="time-outline" size={12} color={colors.warningText} />
-                <Text style={styles.pendingBadgeText}>Fotos Pendentes</Text>
-              </View>
+              <TouchableOpacity onPress={handleClearFile} style={styles.clearBtn}>
+                <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
+                <Text style={styles.clearBtnText}>Trocar arquivo</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.previewList}>
@@ -367,6 +456,30 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 17,
   },
+  errorCard: {
+    padding: 14,
+    marginBottom: 16,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  errorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  errorTitle: {
+    ...typography.h3,
+    fontSize: 14,
+    color: colors.danger,
+  },
+  errorText: {
+    ...typography.caption,
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
   pickerBox: {
     backgroundColor: colors.surface,
     borderWidth: 2,
@@ -377,6 +490,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
+  },
+  pickerBoxSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.surfaceSubtle,
   },
   pickerTitle: {
     ...typography.h3,
@@ -405,21 +522,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.textPrimary,
   },
-  pendingBadge: {
+  clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.warningBg,
-    paddingVertical: 3,
+    paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FDE68A',
   },
-  pendingBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.warningText,
+  clearBtnText: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   previewList: {
     backgroundColor: colors.surface,
