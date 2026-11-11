@@ -103,6 +103,7 @@ export const Stepper: React.FC<StepperProps> = ({
 
 const styles = StyleSheet.create({
   container: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surfaceSubtle,
@@ -125,12 +126,15 @@ const styles = StyleSheet.create({
     opacity: 0.35,
   },
   inputContainer: {
-    minWidth: 54,
-    paddingHorizontal: 6,
+    // Largura fixa: no Android o TextInput cresce com o conteúdo e empurra o "+" para fora.
+    width: 60,
+    paddingHorizontal: 4,
     justifyContent: 'center',
     alignItems: 'center',
   },
   input: {
+    width: '100%',
+    paddingHorizontal: 0,
     fontSize: 18,
     fontWeight: '700',
     color: colors.textPrimary,

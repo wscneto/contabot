@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -11,8 +10,8 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -23,10 +22,13 @@ import { Stepper } from '../../../../components/Stepper';
 import { Button } from '../../../../components/Button';
 import { Card } from '../../../../components/Card';
 import { colors, typography } from '../../../../constants/theme';
+import { confirmAction, showMessage } from '../../../../utils/confirm';
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
 
   // Local state for counts by product_id
   const [counts, setCounts] = useState<Record<string, number | null>>({});
@@ -80,16 +82,11 @@ export default function ReviewScreen() {
     // Check if any item is uncounted
     const uncounted = task.items.filter((item: any) => counts[item.product_id] === null);
     if (uncounted.length > 0) {
-      Alert.alert(
+      confirmAction(
         'Itens Pendentes',
         `Ainda há ${uncounted.length} ${uncounted.length === 1 ? 'produto sem quantidade' : 'produtos sem quantidade'}. Deseja enviar mesmo assim?`,
-        [
-          { text: 'Revisar', style: 'cancel' },
-          {
-            text: 'Enviar assim mesmo',
-            onPress: doSubmit,
-          },
-        ]
+        doSubmit,
+        { confirmText: 'Enviar assim mesmo', cancelText: 'Revisar' },
       );
       return;
     }
@@ -103,13 +100,15 @@ export default function ReviewScreen() {
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
       }
-      Alert.alert(
+      // Atualiza as listas antes de sair, para a contagem já aparecer como enviada.
+      void queryClient.invalidateQueries();
+      showMessage(
         'Contagem Enviada!',
         'Sua conferência foi enviada com sucesso e aguarda aprovação do gerente.',
-        [{ text: 'OK', onPress: () => router.replace('/(employee)') }]
+        () => router.replace('/(employee)'),
       );
     } catch (err: any) {
-      Alert.alert('Erro ao enviar', err.message || 'Falha no envio.');
+      showMessage('Erro ao enviar', err.message || 'Falha no envio.');
     } finally {
       setSubmitting(false);
     }
@@ -223,7 +222,8 @@ export default function ReviewScreen() {
   const totalCount = task.items.length;
 
   return (
-    <SafeAreaView style={styles.container}>
+    // A borda inferior fica com a barra de ações, que soma o recuo do sistema.
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Header
         title={task.area?.name || 'Conferência'}
         subtitle="Conferir e Confirmar Produtos"
@@ -245,7 +245,7 @@ export default function ReviewScreen() {
         data={task.items}
         keyExtractor={(item) => item.product_id}
         renderItem={renderProductRow}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 140 + insets.bottom }]}
         ListHeaderComponent={
           <View style={styles.listHeader}>
             <Text style={styles.guideTitle}>Conferência na Prateleira</Text>
@@ -258,7 +258,7 @@ export default function ReviewScreen() {
 
       {/* Floating Bottom Bar (Only if not read-only) */}
       {!isReadOnly && (
-        <View style={styles.bottomBar}>
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
           <View style={styles.progressRow}>
             <Text style={styles.progressText}>
               <Text style={styles.bold}>{countedCount}</Text> de {totalCount} conferidos
@@ -347,7 +347,6 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingBottom: 120,
   },
   listHeader: {
     marginBottom: 16,
@@ -463,11 +462,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceBorder,
     paddingTop: 12,
   },
   countLabel: {
+    // Em telas estreitas o rótulo quebra em duas linhas; o contador nunca encolhe.
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: '600',
     color: colors.textPrimary,
@@ -487,7 +489,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.surfaceBorder,
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.08,

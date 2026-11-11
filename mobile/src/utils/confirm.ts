@@ -33,3 +33,19 @@ export function confirmAction(
     },
   ]);
 }
+
+/**
+ * Aviso com um único botão. Na web `Alert.alert` não exibe nada, então usamos
+ * `window.alert`; `onClose` roda depois que a pessoa fecha o aviso.
+ */
+export function showMessage(title: string, message: string, onClose?: () => void) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onClose?.();
+    return;
+  }
+  Alert.alert(title, message, [{ text: 'OK', onPress: onClose }], {
+    cancelable: Boolean(onClose),
+    onDismiss: onClose,
+  });
+}
