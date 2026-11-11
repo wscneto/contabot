@@ -269,9 +269,10 @@ export function parseCountResult(
       throw new SchemaError('Sobreposição não resolvida permite quantidade apenas em um único frame.');
     }
   }
-  if (result.unknown_products.length && result.counts.length && !result.counts.some((c) => c.needs_review)) {
-    throw new SchemaError('Produtos desconhecidos exigem revisão da identificação.');
-  }
+  // Produtos fora do catálogo (ex.: outros itens na mesma prateleira) são comuns
+  // em loja real e não invalidam a contagem. O prompt pede needs_review quando
+  // eles podem afetar a identificação; rejeitar a resposta inteira aqui fazia
+  // toda captura real cair na conferência manual.
   validateMembership(result.video_id, result.counts, videoId, skuIds, frameIds);
   return result;
 }
@@ -291,6 +292,9 @@ export function validateStage(
       : parseCountResult(payload, videoId, skuIds, frameIds);
   } catch (error) {
     if (error instanceof SchemaError) {
+      // Só no log do servidor: qual regra falhou e o início da resposta, para
+      // ajustar prompt ou modelo sem expor detalhes ao app.
+      console.error(`[${stage}] resposta rejeitada: ${error.message}`, JSON.stringify(payload).slice(0, 2000));
       throw new ProviderError(
         'A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.',
         opts,

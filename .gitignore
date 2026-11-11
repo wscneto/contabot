@@ -1,15 +1,7 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
 .env
 .env.*
 !.env.example
-data/
-data_*/
-demo/
-*.egg-info/
-.coverage
+.DS_Store
 
-# Assets de demonstração do seed (o padrão demo/ acima é do MVP antigo)
-!supabase/seed/demo/
+# Vídeos e fotos reais para testar a IA (não vão para o repositório)
+amostras/

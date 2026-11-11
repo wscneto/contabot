@@ -48,3 +48,28 @@ No teste real, `gpt-5.5` pelo login ChatGPT retornou **6 unidades visíveis em f
 O teste foi salvo separadamente como `minions-frames-vizinhos.mp4`, ID `2c03962943d7476a9f1bd80a185fd9e3`; exportação local em `demo/minions-neighbor-result.json`. A contagem anterior do usuário e sua correção foram preservadas. A quantidade corrigida anteriormente não foi enviada ao modelo.
 
 Este é um teste de ajuste com o mesmo vídeo; não é avaliação independente, prova de precisão geral ou confirmação de estoque total. Caixas ocultas continuam fora da sugestão.
+
+## Teste com o backend Supabase e IA real (11/11/2026)
+
+Primeiro teste da arquitetura nova (Edge Function `analyze-capture`) com IA real. O app não foi usado: um script reproduziu o celular, escolhendo os quadros com o mesmo código (`_shared/frame-selection.ts`, versão `device-temporal-v1`), enviando-os ao Storage local e chamando a análise.
+
+- Provedor: DeepInfra, modelo `google/gemini-3.7-flash`, `json_schema`, temperatura 0.
+- Vídeo: `amostras/lingua-de-gato/prateleira.mp4` (54,98 s, 832 × 464), fora do Git.
+- Catálogo: um SKU, “Crocantinho Kopenhagen”, com as duas fotos de referência de `amostras/`.
+- Seleção: 1 candidato por segundo; 5 quadros de identificação e até 20 enviados, como no app.
+
+| Execução | Resultado | Tempo da IA |
+| --- | --- | ---: |
+| Vídeo inteiro | `missing`: os 5 quadros de identificação (8, 12, 31, 36 e 53 s) não incluíram o trecho de 14–18 s em que o produto aparece. Os demais produtos (Língua de Gato, Chokonut, Pistache) foram descritos corretamente como fora do catálogo. | 6,1 s |
+| Trecho de 7,5 s só da seção (12,5–20 s), antes da correção | Falha de validação: a IA respondeu 7 caixas com cobertura completa, mas a resposta foi descartada porque listava produtos fora do catálogo. | 10,1 s |
+| Mesmo trecho, após a correção (2 execuções) | `ok`, **7 caixas** nas duas, com evidência no quadro de vista superior da fileira. | 10,3 s e 8,1 s |
+
+A inspeção visual do quadro de evidência confirma 7 caixas visíveis na fileira. Não houve contagem física independente.
+
+**Correção feita.** `parseCountResult` rejeitava a resposta inteira quando `unknown_products` não estava vazio e nenhuma contagem pedia revisão. Em loja real há sempre outros produtos ao lado (aqui, Alfajor e Lajotinha), então toda captura real caía na conferência manual. A regra foi removida: o prompt já pede `needs_review` quando esses produtos podem afetar a identificação. O servidor agora também registra no log qual regra rejeitou uma resposta.
+
+**Custo.** A etapa de contagem registrou cerca de 13 mil tokens de entrada e 220–290 de saída, aproximadamente US$ 0,011 pelo valor informado pela DeepInfra. O custo da identificação não foi registrado; estimativa total em torno de US$ 0,02 por análise.
+
+**Conclusões.**
+- A contagem funciona quando o vídeo cobre só a seção da contagem. Em uma varredura longa de várias prateleiras, 5 quadros de identificação podem não incluir o produto. A tela de filmagem deve orientar a filmar só a prateleira da contagem, devagar e com uma vista de cima.
+- Um único vídeo, usado também para ajuste, não comprova precisão. Próximo passo: 5 a 10 filmagens novas de seções curtas, com contagem física anotada antes, para medir acertos, tempo e custo.

@@ -74,12 +74,12 @@ Deno.test('campos extras e SKUs desconhecidos falham fechado', () => {
   assertThrows(() => validate(unknownFrame), Error, 'não foi enviado');
 });
 
-Deno.test('produtos desconhecidos exigem revisão', () => {
+Deno.test('produtos fora do catálogo não invalidam a contagem', () => {
   const payload = suggestion(3);
-  payload.unknown_products = ['Caixa azul sem rótulo'];
-  assertThrows(() => validate(payload), Error, 'revisão');
-  Object.assign(payload.counts[0], { needs_review: true, reason: 'Produto desconhecido ao lado.' });
-  assertEquals(validate(payload).unknown_products.length, 1);
+  payload.unknown_products = ['Alfajor na fileira ao lado'];
+  const result = validate(payload);
+  assertEquals(result.counts[0].quantity, 3);
+  assertEquals(result.unknown_products.length, 1);
 });
 
 Deno.test('identificação exige todos os SKUs, motivo e evidência para present', () => {
