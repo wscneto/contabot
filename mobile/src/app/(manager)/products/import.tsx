@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import { api, ImportProductItem } from '../../../services/api';
 import { Header } from '../../../components/Header';
@@ -40,15 +40,44 @@ export default function ImportProductsScreen() {
     let barcodeIdx = -1;
     let minStockIdx = -1;
 
+    // 1. Nome/Descrição: priorizar 'descrição', 'descricao', 'nome'
     headerRow.forEach((col: any, idx: number) => {
       const str = String(col || '').toLowerCase().trim();
-      if (/nome|produto|product|item|descri/i.test(str) && nameIdx === -1) {
+      if (/descri|nome/i.test(str) && !/c[oó]d/i.test(str) && nameIdx === -1) {
         nameIdx = idx;
-      } else if (/variante|variant|gramatura|peso|apresenta/i.test(str) && variantIdx === -1) {
-        variantIdx = idx;
-      } else if (/c[oó]digo|ean|barcode|gtin|barras/i.test(str) && barcodeIdx === -1) {
+      }
+    });
+
+    // Se não encontrou 'descrição'/'nome', procura 'produto' ou 'item' (sem ser código)
+    if (nameIdx === -1) {
+      headerRow.forEach((col: any, idx: number) => {
+        const str = String(col || '').toLowerCase().trim();
+        if (/produto|product|item/i.test(str) && !/c[oó]d/i.test(str) && nameIdx === -1) {
+          nameIdx = idx;
+        }
+      });
+    }
+
+    // 2. Código de barras / EAN
+    headerRow.forEach((col: any, idx: number) => {
+      const str = String(col || '').toLowerCase().trim();
+      if (/barra|ean|gtin|barcode/i.test(str) && barcodeIdx === -1) {
         barcodeIdx = idx;
-      } else if (/m[ií]nimo|min_stock|estoque_min|min/i.test(str) && minStockIdx === -1) {
+      }
+    });
+
+    // 3. Variante / Gramatura
+    headerRow.forEach((col: any, idx: number) => {
+      const str = String(col || '').toLowerCase().trim();
+      if (/variante|variant|gramatura|peso|apresenta/i.test(str) && variantIdx === -1) {
+        variantIdx = idx;
+      }
+    });
+
+    // 4. Estoque mínimo / Mínimo
+    headerRow.forEach((col: any, idx: number) => {
+      const str = String(col || '').toLowerCase().trim();
+      if (/m[ií]nimo|min_stock|estoque_min/i.test(str) && minStockIdx === -1) {
         minStockIdx = idx;
       }
     });
