@@ -13,17 +13,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../../../context/AuthContext';
-import { startCaptureJob } from '../../../../services/capture';
+import { api } from '../../../../services/api';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../../services/capture';
 import { Button } from '../../../../components/Button';
 import { colors } from '../../../../constants/theme';
+
+/** Segundos iniciais da gravação dedicados à vista de cima da prateleira. */
+const OVERVIEW_SECONDS = 5;
 
 export default function CameraRecorderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { config } = useAuth();
-  const maxDuration = config?.max_video_seconds || 60;
+  // Teste com IA real: em varreduras longas a identificação perde produtos.
+  // Vídeo curto de uma única prateleira, nunca acima do teto do processamento.
+  const maxDuration = Math.min(config?.max_video_seconds || 30, CAPTURE_SETTINGS.maxDurationSeconds);
+
+  // Mesma consulta da tela da contagem (vem do cache): nome da área a filmar.
+  const { data: task } = useQuery({
+    queryKey: ['task_detail', id],
+    queryFn: () => api.getTask(id),
+    enabled: Boolean(id),
+  });
+  const areaName: string | undefined = task?.area?.name;
 
   const cameraRef = useRef<CameraView>(null);
   // A análise usa só imagens: a câmera grava sem áudio (prop mute) e o app não
@@ -127,6 +141,16 @@ export default function CameraRecorderScreen() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Orientação que acompanha a gravação: primeiro a visão geral (de onde a IA
+  // conta as fileiras), depois a passagem pela frente (de onde identifica).
+  const remaining = maxDuration - elapsedSeconds;
+  const recordingHint =
+    remaining <= 5
+      ? `Finalizando em ${remaining}s…`
+      : elapsedSeconds < OVERVIEW_SECONDS
+        ? 'Comece de cima: mostre a prateleira inteira'
+        : 'Agora passe devagar pela frente das caixas';
+
   // If permission not determined yet
   if (!cameraPermission) {
     return (
@@ -202,12 +226,28 @@ export default function CameraRecorderScreen() {
               <View style={[styles.corner, styles.cornerBL]} />
               <View style={[styles.corner, styles.cornerBR]} />
               <Text style={styles.guideText}>
-                {isRecording
-                  ? 'Mova o celular devagar para a direita ou esquerda…'
-                  : 'Enquadre a prateleira com todas as caixas visíveis'}
+                {isRecording ? recordingHint : 'Enquadre só a prateleira desta contagem'}
               </Text>
             </View>
           </View>
+
+          {!isRecording && (
+            <View style={styles.tipsCard} pointerEvents="none">
+              <Text style={styles.tipsTitle}>
+                {areaName ? `Filme só: ${areaName}` : 'Filme só a prateleira desta contagem'}
+              </Text>
+              {[
+                ['eye-outline', `Comece de cima, mostrando todas as caixas (${OVERVIEW_SECONDS} s)`],
+                ['swap-horizontal', 'Depois passe devagar pela frente dos produtos'],
+                ['timer-outline', `Até ${maxDuration} s. Outras prateleiras atrapalham a contagem`],
+              ].map(([icon, text]) => (
+                <View key={text} style={styles.tipRow}>
+                  <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={16} color="#FFF" />
+                  <Text style={styles.tipText}>{text}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Bottom Controls */}
           <SafeAreaView style={styles.bottomBar}>
@@ -375,6 +415,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     maxWidth: '90%',
+  },
+  tipsCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  tipsTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  tipText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 13,
+    marginLeft: 8,
+    flexShrink: 1,
   },
   bottomBar: {
     paddingBottom: 24,

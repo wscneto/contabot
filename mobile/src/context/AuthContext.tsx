@@ -22,7 +22,7 @@ export interface SystemConfig {
 }
 
 const DEFAULT_CONFIG: SystemConfig = {
-  max_video_seconds: Number(process.env.EXPO_PUBLIC_MAX_VIDEO_SECONDS) || 60,
+  max_video_seconds: Number(process.env.EXPO_PUBLIC_MAX_VIDEO_SECONDS) || 30,
 };
 
 interface AuthContextType {
