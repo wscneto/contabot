@@ -2,6 +2,7 @@
   "name": "contabot",
   "version": "1.0.0",
   "main": "expo-router/entry",
+  "packageManager": "pnpm@12.18.0",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@supabase/supabase-js": "^2.119.0",
