@@ -37,7 +37,8 @@ export const CAPTURE_SETTINGS = {
   analysisMaxDimension: 640,
   uploadMaxDimension: 1920,
   uploadQuality: 0.85,
-  maxDurationSeconds: 180,
+  /** Teto para vídeos da galeria: varreduras longas fazem a IA perder produtos. */
+  maxDurationSeconds: 60,
   thumbnailBatch: 4,
 };
 

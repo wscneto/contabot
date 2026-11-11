@@ -131,7 +131,7 @@ Ao rodar `supabase/scripts/seed-demo.ts`, as seguintes credenciais são criadas 
 ### 1. Fluxo do Funcionário (Simples, Rápido e Sem Ruído)
 1. **Login Instantâneo**: Digita o código de 8 dígitos ou escaneia o QR Code fornecido pelo gerente.
 2. **Minhas Contagens**: Lista somente as áreas que ele precisa contar no momento. Destaque visual em vermelho para solicitações de **Recontagem**.
-3. **Câmera Guiada**: Interface com retículo central, nível de estabilidade, dicas de filmagem ("Mantenha velocidade constante", "Mostre topo e laterais"), botão de ligar/desligar lanterna (torch) e temporizador de 60 segundos com parada automática.
+3. **Câmera Guiada**: Interface com retículo central, nível de estabilidade, dicas de filmagem ("Mantenha velocidade constante", "Mostre topo e laterais"), botão de ligar/desligar lanterna (torch) e temporizador de 30 segundos com parada automática. Antes de gravar, a tela pede para filmar só a prateleira da contagem, começando por uma vista de cima; vídeos da galeria aceitam até 60 s.
 4. **Análise em Segundo Plano**: O celular escolhe e envia os melhores quadros; em seguida a IA identifica e conta os produtos no servidor, com o progresso de cada etapa na tela.
 5. **Conferência na Prateleira**: Tela com cartões grandes e botões `+` e `-` ergonômicos (com feedback tátil Haptics). Para cada produto, o funcionário pode tocar em **"Ver Evidência"** para abrir a foto ampliada onde a IA detectou as unidades.
 6. **Submissão**: Ao clicar em "Confirmar e Enviar", a contagem é enviada para validação da gerência.

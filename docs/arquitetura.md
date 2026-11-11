@@ -20,7 +20,7 @@ flowchart LR
     G -->|Pedir recontagem| C2[Contagem volta<br/>com observação]
   end
   subgraph Funcionário
-    D[Vê 'Para hoje'] --> E[Guia + câmera<br/>até 60 s]
+    D[Vê 'Para hoje'] --> E[Guia + câmera<br/>até 30 s]
     E --> F[Envio com fila offline<br/>+ análise]
     F --> F2[Confere números<br/>na prateleira]
     F2 -->|Enviar| G

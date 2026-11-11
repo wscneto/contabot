@@ -15,7 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { api } from '../../../../services/api';
-import { startCaptureJob } from '../../../../services/capture';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../../services/capture';
+import { useAuth } from '../../../../context/AuthContext';
 import { Header } from '../../../../components/Header';
 import { Badge } from '../../../../components/Badge';
 import { Button } from '../../../../components/Button';
@@ -25,6 +26,8 @@ import { colors, typography } from '../../../../constants/theme';
 export default function TaskStartScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { config } = useAuth();
+  const maxVideoSeconds = Math.min(config?.max_video_seconds || 30, CAPTURE_SETTINGS.maxDurationSeconds);
 
   const [uploadingGallery, setUploadingGallery] = useState(false);
 
@@ -61,6 +64,16 @@ export default function TaskStartScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        // duration vem em milissegundos. Avisa antes de criar a captura, em vez
+        // de falhar depois na tela de análise.
+        const seconds = (asset.duration ?? 0) / 1000;
+        if (seconds > CAPTURE_SETTINGS.maxDurationSeconds + 0.5) {
+          Alert.alert(
+            'Vídeo longo demais',
+            `Este vídeo tem ${Math.round(seconds)} s. Use até ${CAPTURE_SETTINGS.maxDurationSeconds} s mostrando só a prateleira desta contagem: em vídeos longos a IA pode deixar produtos de fora.`,
+          );
+          return;
+        }
         setUploadingGallery(true);
         startCaptureJob(task.id, asset.uri);
         router.replace(`/(employee)/task/${task.id}/analyzing`);
@@ -162,7 +175,7 @@ export default function TaskStartScreen() {
               <View style={styles.methodTextCol}>
                 <Text style={styles.methodTitlePrimary}>Filmar Prateleira (Recomendado)</Text>
                 <Text style={styles.methodDescPrimary}>
-                  Grave um vídeo curto de até 60 segundos. A IA identificará os produtos e sugerirá as quantidades automaticamente.
+                  Grave até {maxVideoSeconds} segundos só desta prateleira, começando de cima. A IA identificará os produtos e sugerirá as quantidades.
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.surface} />
@@ -184,7 +197,7 @@ export default function TaskStartScreen() {
               <View style={styles.methodTextCol}>
                 <Text style={styles.methodTitle}>Escolher Vídeo da Galeria</Text>
                 <Text style={styles.methodDesc}>
-                  Selecione um vídeo gravado previamente no seu celular.
+                  Selecione um vídeo de até {CAPTURE_SETTINGS.maxDurationSeconds} segundos gravado só desta prateleira.
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
