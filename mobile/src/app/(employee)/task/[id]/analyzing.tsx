@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   StyleSheet,
   Text,
@@ -12,7 +13,8 @@ import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../../services/api';
-import { type CaptureProgress, subscribeCaptureJob } from '../../../../services/capture';
+import { useAuth } from '../../../../context/AuthContext';
+import { type CaptureProgress, getCaptureJob, subscribeCaptureJob } from '../../../../services/capture';
 import { Card } from '../../../../components/Card';
 import { Button } from '../../../../components/Button';
 import { colors, typography } from '../../../../constants/theme';
@@ -20,7 +22,9 @@ import { colors, typography } from '../../../../constants/theme';
 export default function AnalyzingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   const [local, setLocal] = useState<CaptureProgress | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   // Progresso da seleção/envio de quadros feita neste aparelho.
   useEffect(() => (id ? subscribeCaptureJob(id, setLocal) : undefined), [id]);
@@ -47,8 +51,45 @@ export default function AnalyzingScreen() {
   const stage = capture?.stage;
   // Falha antes de a captura existir (ex.: contagem já enviada por outra pessoa).
   const startFailed = local?.phase === 'failed' && task && task.status !== 'analyzing';
+  // Envio interrompido neste aparelho: a captura espera quadros que nunca vão
+  // chegar (app fechado no meio, ou falha de rede ao avisar o servidor). Sem
+  // isto, a tela ficaria esperando até a captura expirar no servidor.
+  const interrupted = Boolean(
+    task?.status === 'analyzing' &&
+      capture?.status === 'processing' &&
+      stage === 'frames' &&
+      capture?.by?.id === user?.id &&
+      (!(id && getCaptureJob(id)) || local?.phase === 'failed'),
+  );
+
+  const resolveInterrupted = async (next: 'camera' | 'review') => {
+    if (!capture || resolving) return;
+    setResolving(true);
+    try {
+      if (next === 'camera') {
+        await api.failCapture(capture.id, 'Envio interrompido antes de os quadros chegarem. Vídeo gravado novamente.');
+        router.replace(`/(employee)/task/${id}/camera`);
+      } else {
+        await api.switchToManual(id);
+        router.replace(`/(employee)/task/${id}/review`);
+      }
+    } catch (error) {
+      setResolving(false);
+      Alert.alert(
+        'Não foi possível continuar',
+        error instanceof Error && error.message ? error.message : 'Confira a conexão e tente novamente.',
+      );
+    }
+  };
 
   const getStageInfo = () => {
+    if (interrupted) {
+      return {
+        step: 'Envio interrompido',
+        title: 'Os quadros do vídeo não foram enviados',
+        desc: local?.error || 'O app foi fechado ou perdeu a conexão durante o envio. Filme novamente ou faça a conferência manual.',
+      };
+    }
     if (startFailed) {
       return {
         step: 'Não foi possível analisar',
@@ -107,7 +148,7 @@ export default function AnalyzingScreen() {
       <View style={styles.content}>
         <View style={styles.spinnerContainer}>
           <View style={styles.pulseRing}>
-            {startFailed ? (
+            {startFailed || interrupted ? (
               <Ionicons name="alert-circle-outline" size={40} color={colors.dangerText} />
             ) : (
               <ActivityIndicator size="large" color={colors.primary} />
@@ -129,7 +170,23 @@ export default function AnalyzingScreen() {
           </Text>
         </Card>
 
-        {startFailed ? (
+        {interrupted ? (
+          <>
+            <Button
+              title="Filmar novamente"
+              onPress={() => resolveInterrupted('camera')}
+              loading={resolving}
+              style={styles.skipBtn}
+            />
+            <Button
+              title="Conferir manualmente"
+              onPress={() => resolveInterrupted('review')}
+              disabled={resolving}
+              variant="outline"
+              style={styles.skipBtn}
+            />
+          </>
+        ) : startFailed ? (
           <Button
             title="Voltar para a contagem"
             onPress={() => router.replace(`/(employee)/task/${id}`)}

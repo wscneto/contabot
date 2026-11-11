@@ -268,3 +268,58 @@ Deno.test({
     );
   },
 });
+
+Deno.test({
+  name: 'capturas paradas expiram e o limite diário de análises é respeitado',
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const manager = await newManager('Loja Expiração');
+    const { store } = await rpc(manager, 'whoami');
+    const photoPath = `${store.id}/products/${crypto.randomUUID()}.jpg`;
+    await manager.storage.from('media').upload(photoPath, image, { contentType: 'image/jpeg' });
+    const product = await rpc(manager, 'create_product', { p_name: 'Arroz', p_photos: [photoPath] });
+    const area = await rpc(manager, 'create_area', { p_name: 'Corredor', p_product_ids: [product.id] });
+    const [task] = await rpc(manager, 'create_tasks', { p_area_ids: [area.id] });
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+    // App fechado durante o envio: a captura em "frames" expira depois de 15 minutos.
+    const first = await rpc(manager, 'start_capture', { p_task_id: task.id });
+    await admin.from('captures').update({ updated_at: ago(5) }).eq('id', first.capture_id);
+    assertEquals((await rpc(manager, 'get_task', { p_id: task.id })).status, 'analyzing', 'ainda dentro do prazo');
+    await admin.from('captures').update({ updated_at: ago(16) }).eq('id', first.capture_id);
+    let detail = await rpc(manager, 'get_task', { p_id: task.id });
+    assertEquals(detail.status, 'review');
+    assertEquals(detail.capture.status, 'failed');
+    assert(String(detail.capture.error).includes('envio dos quadros'), detail.capture.error);
+    assertEquals(detail.items[0].ai_status, 'manual');
+
+    // Edge Function interrompida depois de assumir a contagem: expira em 10 minutos,
+    // e a resposta tardia do modelo não sobrescreve a falha.
+    const second = await rpc(manager, 'start_capture', { p_task_id: task.id });
+    await admin.from('captures')
+      .update({ stage: 'counting', claimed_stage: 'counting', updated_at: ago(11) })
+      .eq('id', second.capture_id);
+    const listed = await rpc(manager, 'list_tasks', { p_scope: 'all' });
+    assertEquals(listed.find((t: { id: string }) => t.id === task.id).status, 'review');
+    detail = await rpc(manager, 'get_task', { p_id: task.id });
+    assertEquals(detail.capture.status, 'failed');
+    assert(String(detail.capture.error).includes('demorou demais'), detail.capture.error);
+    const late = await admin.rpc('pipeline_finish', {
+      p_capture_id: second.capture_id,
+      p_result_frames: [],
+      p_unknown_products: [],
+      p_items: [],
+      p_event: 'resposta tardia',
+    });
+    assertEquals(late.data, false);
+
+    // Limite diário: as duas capturas acima já contam.
+    await admin.from('stores').update({ daily_capture_limit: 3 }).eq('id', store.id);
+    const third = await rpc(manager, 'start_capture', { p_task_id: task.id });
+    await rpc(manager, 'fail_capture', { p_capture_id: third.capture_id, p_error: 'teste' });
+    await assertRejects(() => rpc(manager, 'start_capture', { p_task_id: task.id }), Error, 'Limite de 3 análises');
+    const blocked = await rpc(manager, 'get_task', { p_id: task.id });
+    assertEquals(blocked.status, 'review', 'limite não deixa a contagem presa');
+  },
+});

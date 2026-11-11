@@ -65,6 +65,8 @@ Status da contagem (`tasks.status`):
 | `submitted` | Aguardando gerente | Aprovar ou pedir recontagem |
 | `approved` | Concluída; estoque gravado | — |
 
+Uma captura que para de avançar expira sozinha: 15 minutos sem os quadros (app fechado ou sem conexão) ou 10 minutos parada na análise. Quando alguém lista ou abre as contagens da loja, ela é marcada como falha e a contagem volta para a conferência manual. Cada loja tem um limite de capturas em 24 horas (`stores.daily_capture_limit`, padrão 30); ao atingi-lo, `start_capture` recusa novas análises, mas a contagem manual continua disponível.
+
 Status sugerido de cada produto (`task_items.ai_status`):
 
 | ai_status | Origem | Na conferência |

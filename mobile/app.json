@@ -30,7 +30,23 @@
       "expo-secure-store",
       "expo-font",
       "expo-splash-screen",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O ContaBot usa a câmera para filmar a prateleira e contar os produtos.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O ContaBot acessa suas fotos e vídeos para usar imagens de produtos e filmagens já gravadas.",
+          "cameraPermission": "O ContaBot usa a câmera para fotografar os produtos do catálogo.",
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }
