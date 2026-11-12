@@ -121,6 +121,9 @@ export const api = {
 
   // ----- Sessão e equipe -----
   whoami: () => rpc('whoami', {}, false),
+  getStoreSettings: () => rpc<{ default_counting_instruction: string }>('get_store_settings', {}, false),
+  updateCountingInstruction: (instruction: string) =>
+    rpc<{ default_counting_instruction: string }>('update_counting_instruction', { p_instruction: instruction }, false),
   listTeam: () => rpc('list_team'),
   createEmployee: (name: string) => invoke<{ user: any; access_code: string }>('create-employee', { name }),
   regenerateAccessCode: (userId: string) => rpc('regenerate_access_code', { p_user_id: userId }),
