@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -24,6 +24,16 @@ import { colors } from '../../../../constants/theme';
 const OVERVIEW_SECONDS = 5;
 
 export default function CameraRecorderScreen() {
+  // This route is a native full-screen modal. Measure safe areas in its own
+  // native surface instead of inheriting the presenting screen's metrics.
+  return (
+    <SafeAreaProvider>
+      <CameraRecorderContent />
+    </SafeAreaProvider>
+  );
+}
+
+function CameraRecorderContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { config } = useAuth();
@@ -202,7 +212,13 @@ export default function CameraRecorderScreen() {
           <View style={styles.controlsOverlay} pointerEvents="box-none" collapsable={false}>
             {/* Top Bar with Guidelines & Torch */}
             <SafeAreaView style={styles.topBar} edges={['top', 'left', 'right']}>
-              <TouchableOpacity onPress={() => router.back()} style={styles.iconCircle}>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={styles.iconCircle}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar câmera"
+              >
                 <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
 
