@@ -152,3 +152,22 @@ TaskDetail = TaskSummary & { items: TaskItem[], capture: Capture|null, capture_c
 Os limites de aviso continuam heurísticas não calibradas.
 
 **No servidor** (`supabase/functions/analyze-capture`): faz **identificar → contar** com os mesmos prompts e as mesmas regras de validação estrita de `domain.py` (`_shared/vision.ts`). Os quadros da contagem são escolhidos entre os enviados pelo celular (`selectCountingFrames`). Cada etapa roda numa invocação própria, em segundo plano, para caber no limite de tempo das Edge Functions. `pipeline_claim` impede análise duplicada. O provedor é qualquer API compatível com OpenAI Chat Completions, configurada por `VISION_*`, ou `mock`.
+
+## Instrução padrão de contagem por loja
+
+`stores.default_counting_instruction` guarda a orientação de filmagem (1 a 2.000 caracteres).
+Todas as lojas começam com a orientação de filmar uma única prateleira, devagar,
+com vista de cima, boa iluminação e embalagens visíveis.
+
+Em **Equipe e Loja → Mudar instrução padrão**, o gerente pode editar, salvar ou
+restaurar o texto original. A RPC `get_store_settings` devolve a preferência da
+loja do membro ativo; `update_counting_instruction(p_instruction)` permite apenas
+ao gerente alterar a própria loja. Não há parâmetro de loja vindo do cliente.
+
+Em **Nova contagem → Usar instrução padrão**, o app busca o texto salvo no servidor.
+Ele permanece editável e é copiado para a instrução da tarefa; alterar a preferência
+posteriormente não modifica tarefas existentes. Falhas de leitura ou gravação são
+exibidas ao usuário, sem substituir silenciosamente a preferência.
+
+Aplicar a migration `20261112155406_store_counting_instruction.sql` antes de usar
+esta funcionalidade em outro ambiente.

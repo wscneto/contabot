@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import {
   Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   Modal,
   RefreshControl,
   StyleSheet,
@@ -15,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../context/AuthContext';
+import { DEFAULT_FILMING_NOTE } from '../../../constants/counting';
 import { api } from '../../../services/api';
 import { Header } from '../../../components/Header';
 import { Card } from '../../../components/Card';
@@ -27,6 +31,42 @@ export default function ManagerTeamScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, store, logout } = useAuth();
+
+  const [instructionModal, setInstructionModal] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [loadingInstruction, setLoadingInstruction] = useState(false);
+  const [savingInstruction, setSavingInstruction] = useState(false);
+
+  const handleEditInstruction = async () => {
+    setLoadingInstruction(true);
+    try {
+      const settings = await api.getStoreSettings();
+      setInstruction(settings.default_counting_instruction);
+      setInstructionModal(true);
+    } catch (error: any) {
+      Alert.alert('Erro ao carregar instrução', error.message);
+    } finally {
+      setLoadingInstruction(false);
+    }
+  };
+
+  const handleSaveInstruction = async () => {
+    if (!instruction.trim()) {
+      Alert.alert('Atenção', 'Informe a instrução padrão da loja.');
+      return;
+    }
+    setSavingInstruction(true);
+    try {
+      const settings = await api.updateCountingInstruction(instruction.trim());
+      queryClient.setQueryData(['store_settings', store?.id], settings);
+      setInstructionModal(false);
+      Alert.alert('Instrução salva', 'O novo texto está disponível ao usar a instrução padrão em novas contagens.');
+    } catch (error: any) {
+      Alert.alert('Erro ao salvar instrução', error.message);
+    } finally {
+      setSavingInstruction(false);
+    }
+  };
 
   const [addModal, setAddModal] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
@@ -216,6 +256,13 @@ export default function ManagerTeamScreen() {
               <Text style={styles.storeMeta}>
                 Gerente: <Text style={styles.bold}>{user?.name}</Text>
               </Text>
+              <Button
+                title="Mudar instrução padrão"
+                variant="outline"
+                size="sm"
+                onPress={handleEditInstruction}
+                loading={loadingInstruction}
+              />
             </Card>
 
             <View style={styles.teamHeaderRow}>
@@ -239,6 +286,28 @@ export default function ManagerTeamScreen() {
           </View>
         }
       />
+
+      <Modal visible={instructionModal} transparent animationType="fade"
+        onRequestClose={() => { if (!savingInstruction) setInstructionModal(false); }}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>Instrução padrão da loja</Text>
+              <Text style={styles.modalSubtitle}>Oriente a filmagem da sua equipe. Contagens já criadas mantêm suas instruções.</Text>
+              <Input label="Instruções para a filmagem" value={instruction} onChangeText={setInstruction}
+                multiline numberOfLines={6} maxLength={2000} editable={!savingInstruction}
+                style={{ minHeight: 150, textAlignVertical: 'top' }} />
+              <Button title="Restaurar texto original" variant="ghost" size="sm"
+                disabled={savingInstruction} onPress={() => setInstruction(DEFAULT_FILMING_NOTE)} />
+              <View style={styles.modalBtns}>
+                <Button title="Cancelar" variant="outline" disabled={savingInstruction}
+                  onPress={() => setInstructionModal(false)} style={{ flex: 1 }} />
+                <Button title="Salvar" loading={savingInstruction} onPress={handleSaveInstruction} style={{ flex: 1 }} />
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Add Member Modal */}
       <Modal visible={addModal} transparent animationType="fade">
