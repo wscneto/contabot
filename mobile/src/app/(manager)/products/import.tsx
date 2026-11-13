@@ -23,6 +23,77 @@ import { Card } from '../../../components/Card';
 import { showMessage } from '../../../utils/confirm';
 import { colors, typography } from '../../../constants/theme';
 
+const readUriAsBase64 = async (rawUri: string): Promise<string> => {
+  const uri =
+    rawUri.startsWith('file://') || rawUri.startsWith('content://')
+      ? encodeURI(decodeURI(rawUri))
+      : rawUri;
+
+  // 1. Tenta fetch + blob + FileReader (contorna sandbox do Expo Go no Android)
+  try {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result;
+        if (typeof result === 'string') {
+          const base64 = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64);
+        } else {
+          reject(new Error('Resultado inválido ao converter blob para base64.'));
+        }
+      };
+      reader.onerror = (e) => reject(e || new Error('Falha no FileReader.'));
+      reader.readAsDataURL(blob);
+    });
+  } catch (fetchErr) {
+    console.warn(
+      '[ImportProducts] fetch() não conseguiu ler URI, tentando XMLHttpRequest...',
+      fetchErr
+    );
+  }
+
+  // 2. Tenta XMLHttpRequest com responseType blob
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.onload = () => {
+        const blob = xhr.response;
+        if (!blob) {
+          return reject(new Error('Blob vazio retornado pelo XHR.'));
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result;
+          if (typeof result === 'string') {
+            const base64 = result.includes(',') ? result.split(',')[1] : result;
+            resolve(base64);
+          } else {
+            reject(new Error('Resultado inválido no FileReader XHR.'));
+          }
+        };
+        reader.onerror = (e) => reject(e || new Error('Falha no FileReader XHR.'));
+        reader.readAsDataURL(blob);
+      };
+      xhr.onerror = (e) => reject(e || new Error('Falha no XMLHttpRequest para URI.'));
+      xhr.responseType = 'blob';
+      xhr.open('GET', uri, true);
+      xhr.send(null);
+    });
+  } catch (xhrErr) {
+    console.warn(
+      '[ImportProducts] XMLHttpRequest falhou, tentando FileSystem legado...',
+      xhrErr
+    );
+  }
+
+  // 3. Fallback: FileSystem.readAsStringAsync legado
+  return await FileSystem.readAsStringAsync(rawUri, {
+    encoding: 'base64',
+  });
+};
+
 export default function ImportProductsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -173,10 +244,9 @@ export default function ImportProductsScreen() {
         }
         workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
       } else {
-        // No ambiente mobile nativo (Android / iOS)
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: 'base64',
-        });
+        // No ambiente mobile nativo (Android / iOS):
+        // Usa readUriAsBase64 para contornar a restrição de sandbox do Expo Go no Android
+        const base64 = await readUriAsBase64(asset.uri);
         workbook = XLSX.read(base64, { type: 'base64' });
       }
 
