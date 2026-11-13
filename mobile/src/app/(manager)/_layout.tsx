@@ -13,6 +13,7 @@ export default function ManagerLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="products/new" options={{ headerShown: false }} />
       <Stack.Screen name="products/import" options={{ headerShown: false }} />
+      <Stack.Screen name="products/batch-photos" options={{ headerShown: false }} />
       <Stack.Screen name="products/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="areas/new" options={{ headerShown: false }} />
       <Stack.Screen name="tasks/new" options={{ headerShown: false }} />

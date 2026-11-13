@@ -231,6 +231,21 @@ export default function ManagerProductsScreen() {
           ) : undefined
         }
       />
+
+      {/* Botão Redondo no canto inferior direito para o Modo Fotos em Lote */}
+      {filterPendingPhotos && pendingPhotosCount > 0 && (
+        <TouchableOpacity
+          style={styles.batchPhotosFab}
+          onPress={() => router.push('/(manager)/products/batch-photos')}
+          activeOpacity={0.85}
+          accessibilityLabel="Modo fotos em lote"
+        >
+          <Ionicons name="camera" size={26} color="#FFF" />
+          <View style={styles.batchBadge}>
+            <Text style={styles.batchBadgeText}>{pendingPhotosCount}</Text>
+          </View>
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 }
@@ -239,6 +254,42 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  batchPhotosFab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 4.5,
+    zIndex: 999,
+  },
+  batchBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: colors.warning,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
+  batchBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   headerActionsRow: {
     flexDirection: 'row',
