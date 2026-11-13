@@ -130,13 +130,23 @@ export default function BatchPhotosScreen() {
     }
   };
 
-  // 4. Passar para o próximo produto descartando alterações no atual (seta direita inferior)
+  // 4. Passar para o próximo produto (seta direita inferior)
   const handleNext = () => {
     if (isLast) return;
 
-    // Conforme especificado: passa para o próximo da lista descartando as alterações no produto atual
-    setCurrentPhotos([]);
-    setCurrentIndex((prev) => Math.min(currentPending.length - 1, prev + 1));
+    if (currentPhotos.length > 0) {
+      confirmAction(
+        'Descartar Fotos?',
+        'As fotos tiradas deste produto ainda não foram salvas e serão descartadas ao avançar. Deseja continuar?',
+        () => {
+          setCurrentPhotos([]);
+          setCurrentIndex((prev) => Math.min(currentPending.length - 1, prev + 1));
+        },
+        { confirmText: 'Descartar e Avançar', destructive: true }
+      );
+    } else {
+      setCurrentIndex((prev) => Math.min(currentPending.length - 1, prev + 1));
+    }
   };
 
   // 5. Botão de Câmera (centro inferior)
