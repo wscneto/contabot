@@ -153,6 +153,71 @@ export function normalizeVideoUri(videoUri: string): string {
   return uri;
 }
 
+export function prepareVideoUriCandidates(videoUri: string): string[] {
+  const normalized = normalizeVideoUri(videoUri);
+  const candidates: string[] = [];
+
+  // Se tem %25 (dupla codificação de URL, ex: %2540 em vez de %40 no Expo Go),
+  // decodifica para o caminho real no disco do Android (primeira prioridade para MediaMetadataRetriever)
+  if (normalized.includes('%25')) {
+    try {
+      const decodedOnce = decodeURI(normalized);
+      if (!candidates.includes(decodedOnce)) {
+        candidates.push(decodedOnce);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Caminho normalizado
+  if (!candidates.includes(normalized)) {
+    candidates.push(normalized);
+  }
+
+  // Caminho totalmente decodificado (caso o sistema use caracteres desescapados)
+  try {
+    const decodedFull = decodeURIComponent(normalized);
+    if (!candidates.includes(decodedFull)) {
+      candidates.push(decodedFull);
+    }
+  } catch {
+    // ignore
+  }
+
+  return candidates;
+}
+
+async function createPlayerForVideo(videoUri: string): Promise<{ player: VideoPlayer; duration: number }> {
+  const candidates = prepareVideoUriCandidates(videoUri);
+  let lastError: unknown = null;
+
+  for (const uri of candidates) {
+    let p: VideoPlayer | null = null;
+    try {
+      p = createVideoPlayer(uri);
+      p.muted = true;
+      await waitUntilReady(p);
+      const d = p.duration;
+      if (d > 0) {
+        // Valida se o MediaMetadataRetriever nativo consegue ler este caminho gerando um thumbnail de teste
+        const testThumbs = await p.generateThumbnailsAsync([0], { maxWidth: 64, maxHeight: 64 });
+        if (testThumbs && testThumbs.length > 0) {
+          testThumbs.forEach((t) => t.release());
+        }
+        return { player: p, duration: d };
+      }
+      p.release();
+    } catch (err) {
+      console.warn(`[Capture] Candidato de URI falhou (${uri}):`, err);
+      p?.release();
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Não foi possível inicializar o reprodutor de vídeo.');
+}
+
 export async function ensureVideoAccessible(videoUri: string): Promise<string> {
   if (Platform.OS === 'web') return videoUri;
 
@@ -203,12 +268,11 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     }
     emit({ phase: 'preparing', done: 0, total: 0 });
 
-    // Garante que o vídeo é acessível antes de criar o player.
+    // Garante que o vídeo é acessível antes de criar o player e testa compatibilidade nativa de thumbnails
     stableVideoUri = await ensureVideoAccessible(videoUri);
-    player = createVideoPlayer(stableVideoUri);
-    player.muted = true;
-    await waitUntilReady(player);
-    const duration = player.duration;
+    const playerResult = await createPlayerForVideo(stableVideoUri);
+    player = playerResult.player;
+    const duration = playerResult.duration;
     if (!(duration > 0)) throw new Error('O vídeo não informa duração válida; grave novamente.');
     if (duration > CAPTURE_SETTINGS.maxDurationSeconds + 0.5) {
       throw new Error(`Vídeo excede ${CAPTURE_SETTINGS.maxDurationSeconds} segundos. Filme uma seção menor.`);

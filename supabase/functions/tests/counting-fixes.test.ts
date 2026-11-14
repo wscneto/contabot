@@ -50,8 +50,45 @@ export function normalizeVideoUri(rawUri: string): string {
   let uri = rawUri.trim();
   if (!uri.startsWith('file://') && !uri.startsWith('content://') && !uri.startsWith('http://') && !uri.startsWith('https://')) {
     uri = `file://${uri.startsWith('/') ? '' : '/'}${uri}`;
+  } else if (uri.startsWith('file://') && !uri.startsWith('file:///')) {
+    uri = uri.replace('file://', 'file:///');
   }
   return uri;
+}
+
+export function prepareVideoUriCandidates(videoUri: string): string[] {
+  const normalized = normalizeVideoUri(videoUri);
+  const candidates: string[] = [];
+
+  // Se tem %25 (dupla codificação de URL, ex: %2540 em vez de %40 no Expo Go),
+  // decodifica para o caminho real no disco do Android (primeira prioridade)
+  if (normalized.includes('%25')) {
+    try {
+      const decodedOnce = decodeURI(normalized);
+      if (!candidates.includes(decodedOnce)) {
+        candidates.push(decodedOnce);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Normalized path
+  if (!candidates.includes(normalized)) {
+    candidates.push(normalized);
+  }
+
+  // Fully decoded path
+  try {
+    const decodedFull = decodeURIComponent(normalized);
+    if (!candidates.includes(decodedFull)) {
+      candidates.push(decodedFull);
+    }
+  } catch {
+    // ignore
+  }
+
+  return candidates;
 }
 
 export async function resolveAccessibleVideoUri(
@@ -155,6 +192,15 @@ Deno.test('Item 5: normaliza caminhos de vídeo com ou sem scheme file://', () =
   assertEquals(
     normalizeVideoUri('content://media/external/video/media/123'),
     'content://media/external/video/media/123'
+  );
+});
+
+Deno.test('Item 5: decodifica %2540 e %252F do Expo Go para o caminho real do disco Android', () => {
+  const expoGoUri = 'file:///data/user/0/host.exp.exponent/files/ExperienceData/%2540anonymous%252Fcontabot-123/capture.mp4';
+  const candidates = prepareVideoUriCandidates(expoGoUri);
+  assertEquals(
+    candidates[0],
+    'file:///data/user/0/host.exp.exponent/files/ExperienceData/%40anonymous%2Fcontabot-123/capture.mp4'
   );
 });
 
