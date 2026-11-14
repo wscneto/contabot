@@ -13,12 +13,12 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
-import { Card } from '../../components/Card';
-import { Badge } from '../../components/Badge';
-import { Button } from '../../components/Button';
-import { colors, typography } from '../../constants/theme';
+import { useAuth } from '../../../context/AuthContext';
+import { api } from '../../../services/api';
+import { Card } from '../../../components/Card';
+import { Badge } from '../../../components/Badge';
+import { Button } from '../../../components/Button';
+import { colors, typography } from '../../../constants/theme';
 
 export default function ManagerDashboardScreen() {
   const router = useRouter();

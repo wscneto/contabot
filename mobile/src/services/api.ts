@@ -113,6 +113,13 @@ export interface ProductInput {
   photoUris: string[];
 }
 
+export interface ImportProductItem {
+  name: string;
+  variant?: string;
+  barcode?: string;
+  min_stock?: number | null;
+}
+
 export const api = {
   /** URL já assinada pelas consultas; mantido para as telas exibirem imagens. */
   resolveMediaUrl(url: string | null | undefined): string | null {
@@ -155,6 +162,8 @@ export const api = {
     });
   },
   archiveProduct: (id: string) => rpc('archive_product', { p_id: id }),
+  importProducts: (items: ImportProductItem[]) =>
+    rpc<{ count: number; products: any[] }>('import_products', { p_items: items }),
 
   // ----- Áreas -----
   listAreas: () => rpc('list_areas'),

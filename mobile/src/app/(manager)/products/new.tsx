@@ -19,6 +19,7 @@ import { Header } from '../../../components/Header';
 import { Input } from '../../../components/Input';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { showMessage } from '../../../utils/confirm';
 import { colors, typography } from '../../../constants/theme';
 
 export default function NewProductScreen() {
@@ -35,14 +36,14 @@ export default function NewProductScreen() {
 
   const handlePickFromGallery = async () => {
     if (photoUris.length >= 4) {
-      Alert.alert('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
+      showMessage('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
       return;
     }
 
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permissão necessária', 'Permita o acesso à galeria de fotos.');
+        showMessage('Permissão necessária', 'Permita o acesso à galeria de fotos.');
         return;
       }
 
@@ -58,20 +59,20 @@ export default function NewProductScreen() {
         setPhotoUris((prev) => [...prev, ...newUris].slice(0, 4));
       }
     } catch (e: any) {
-      Alert.alert('Erro ao selecionar fotos', e.message);
+      showMessage('Erro ao selecionar fotos', e.message);
     }
   };
 
   const handleTakePhoto = async () => {
     if (photoUris.length >= 4) {
-      Alert.alert('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
+      showMessage('Limite atingido', 'Você pode adicionar no máximo 4 fotos por produto.');
       return;
     }
 
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permissão necessária', 'Permita o acesso à câmera para fotografar a embalagem.');
+        showMessage('Permissão necessária', 'Permita o acesso à câmera para fotografar a embalagem.');
         return;
       }
 
@@ -83,7 +84,7 @@ export default function NewProductScreen() {
         setPhotoUris((prev) => [...prev, result.assets[0].uri].slice(0, 4));
       }
     } catch (e: any) {
-      Alert.alert('Erro ao abrir câmera', e.message);
+      showMessage('Erro ao abrir câmera', e.message);
     }
   };
 
@@ -93,11 +94,11 @@ export default function NewProductScreen() {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      Alert.alert('Atenção', 'Informe o nome do produto.');
+      showMessage('Atenção', 'Informe o nome do produto.');
       return;
     }
     if (photoUris.length === 0) {
-      Alert.alert('Foto obrigatória', 'Envie pelo menos 1 foto nítida da embalagem para a IA reconhecer o produto.');
+      showMessage('Foto obrigatória', 'Envie pelo menos 1 foto nítida da embalagem para a IA reconhecer o produto.');
       return;
     }
 
@@ -119,7 +120,7 @@ export default function NewProductScreen() {
       queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
       router.back();
     } catch (err: any) {
-      Alert.alert('Erro ao salvar produto', err.message || 'Falha ao salvar produto.');
+      showMessage('Erro ao salvar produto', err.message || 'Falha ao salvar produto.');
     } finally {
       setSaving(false);
     }
@@ -130,6 +131,21 @@ export default function NewProductScreen() {
       <Header title="Cadastrar Produto" showBack />
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Import Banner Shortcut */}
+        <TouchableOpacity
+          style={styles.importBanner}
+          onPress={() => router.replace('/(manager)/products/import')}
+        >
+          <Ionicons name="cloud-upload-outline" size={20} color={colors.primary} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.importBannerTitle}>Prefere cadastrar em lote?</Text>
+            <Text style={styles.importBannerSubtitle}>
+              Importe uma planilha (.csv ou .xlsx) com seus produtos
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+        </TouchableOpacity>
+
         {/* Photo Upload Section */}
         <Text style={styles.sectionHeading}>Fotos de Referência da Embalagem *</Text>
         <Text style={styles.sectionSubtitle}>
@@ -285,5 +301,26 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     marginTop: 6,
+  },
+  importBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorderStrong,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+  },
+  importBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  importBannerSubtitle: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
   },
 });
