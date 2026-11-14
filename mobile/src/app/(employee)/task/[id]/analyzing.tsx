@@ -36,17 +36,6 @@ export default function AnalyzingScreen() {
     enabled: Boolean(id),
   });
 
-  useEffect(() => {
-    if (!task) return;
-
-    if (task.status === 'review' || task.status === 'submitted' || task.status === 'approved') {
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
-      }
-      router.replace(`/(employee)/task/${id}/review`);
-    }
-  }, [task?.status, id, router]);
-
   const capture = task?.capture;
   const stage = capture?.stage;
   // Falha antes de a captura existir (ex.: contagem já enviada por outra pessoa).
@@ -62,15 +51,45 @@ export default function AnalyzingScreen() {
       (!(id && getCaptureJob(id)) || local?.phase === 'failed'),
   );
 
+  // Identifica qualquer falha (no dispositivo ou no servidor)
+  const isFailed = Boolean(
+    capture?.status === 'failed' ||
+      local?.phase === 'failed' ||
+      startFailed ||
+      interrupted,
+  );
+
+  useEffect(() => {
+    if (!task) return;
+
+    // Se houve qualquer falha (no celular ou no servidor), NUNCA redireciona automaticamente!
+    // O usuário precisa ver a mensagem de erro e escolher se quer filmar novamente ou conferir manualmente.
+    if (isFailed) return;
+
+    // Redirecionamento automático só ocorre quando a análise da IA foi CONCLUÍDA com sucesso
+    // (capture.status === 'completed') ou quando a tarefa já foi finalizada/aprovada.
+    const isSuccess = task.status === 'review' && capture?.status === 'completed';
+    const isFinalized = task.status === 'submitted' || task.status === 'approved';
+
+    if (isSuccess || isFinalized) {
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
+      }
+      router.replace(`/(employee)/task/${id}/review`);
+    }
+  }, [task?.status, capture?.status, isFailed, id, router]);
+
   const resolveInterrupted = async (next: 'camera' | 'review') => {
-    if (!capture || resolving) return;
+    if (resolving) return;
     setResolving(true);
     try {
       if (next === 'camera') {
-        await api.failCapture(capture.id, 'Envio interrompido antes de os quadros chegarem. Vídeo gravado novamente.');
+        if (capture?.id) {
+          await api.failCapture(capture.id, 'Envio interrompido antes de os quadros chegarem. Vídeo gravado novamente.').catch(() => null);
+        }
         router.replace(`/(employee)/task/${id}/camera`);
       } else {
-        await api.switchToManual(id);
+        await api.switchToManual(id).catch(() => null);
         router.replace(`/(employee)/task/${id}/review`);
       }
     } catch (error) {
@@ -83,11 +102,14 @@ export default function AnalyzingScreen() {
   };
 
   const getStageInfo = () => {
-    if (interrupted) {
+    if (capture?.status === 'failed' || local?.phase === 'failed' || interrupted) {
       return {
         step: 'Envio interrompido',
         title: 'Os quadros do vídeo não foram enviados',
-        desc: local?.error || 'O app foi fechado ou perdeu a conexão durante o envio. Filme novamente ou faça a conferência manual.',
+        desc:
+          local?.error ||
+          capture?.error ||
+          'Ocorreu uma falha no envio ou processamento do vídeo. Filme novamente ou faça a conferência manual.',
       };
     }
     if (startFailed) {
@@ -148,7 +170,7 @@ export default function AnalyzingScreen() {
       <View style={styles.content}>
         <View style={styles.spinnerContainer}>
           <View style={styles.pulseRing}>
-            {startFailed || interrupted ? (
+            {isFailed ? (
               <Ionicons name="alert-circle-outline" size={40} color={colors.dangerText} />
             ) : (
               <ActivityIndicator size="large" color={colors.primary} />
@@ -170,7 +192,7 @@ export default function AnalyzingScreen() {
           </Text>
         </Card>
 
-        {interrupted ? (
+        {isFailed ? (
           <>
             <Button
               title="Filmar novamente"
@@ -186,13 +208,6 @@ export default function AnalyzingScreen() {
               style={styles.skipBtn}
             />
           </>
-        ) : startFailed ? (
-          <Button
-            title="Voltar para a contagem"
-            onPress={() => router.replace(`/(employee)/task/${id}`)}
-            variant="outline"
-            style={styles.skipBtn}
-          />
         ) : (
           <Button
             title="Conferir Manualmente (Pular IA)"

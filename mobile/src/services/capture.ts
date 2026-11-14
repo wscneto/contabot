@@ -12,6 +12,7 @@
  * manual), como fazia o backend antigo.
  */
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 import { decode as decodeJpeg } from 'jpeg-js';
 import {
@@ -131,15 +132,80 @@ async function decodeForAnalysis(thumbnail: Parameters<typeof encodeJpeg>[0]): P
   return { data: decoded.data as Uint8Array, width: decoded.width, height: decoded.height };
 }
 
+/**
+ * Garante que o vídeo existe em um caminho acessível pelo expo-video.
+ *
+ * No Android, `CameraView.recordAsync()` pode devolver um URI cujo arquivo é
+ * removido pelo sistema antes de o `createVideoPlayer` abri-lo (ex.: cache
+ * temporário do DocumentPicker ou do provedor de mídia). Copiamos o vídeo para
+ * o documentDirectory/cacheDirectory do app, que é estável durante a sessão.
+ */
+export function normalizeVideoUri(videoUri: string): string {
+  let uri = videoUri.trim();
+  if (uri.startsWith('content://') || uri.startsWith('http://') || uri.startsWith('https://')) {
+    return uri;
+  }
+  if (!uri.startsWith('file://')) {
+    uri = `file://${uri.startsWith('/') ? '' : '/'}${uri}`;
+  } else if (!uri.startsWith('file:///')) {
+    uri = uri.replace('file://', 'file:///');
+  }
+  return uri;
+}
+
+export async function ensureVideoAccessible(videoUri: string): Promise<string> {
+  if (Platform.OS === 'web') return videoUri;
+
+  const normalizedUri = normalizeVideoUri(videoUri);
+
+  // 1. Tenta o caminho normalizado
+  try {
+    const info = await FileSystem.getInfoAsync(normalizedUri);
+    if (info.exists && (info.size ?? 0) > 0) return normalizedUri;
+  } catch {
+    // ignorar e tentar alternativas
+  }
+
+  // 2. Se o caminho possui caracteres com percent-encoding, tenta a versão decodificada
+  try {
+    const decoded = decodeURI(normalizedUri);
+    if (decoded !== normalizedUri) {
+      const decodedInfo = await FileSystem.getInfoAsync(decoded);
+      if (decodedInfo.exists && (decodedInfo.size ?? 0) > 0) return decoded;
+    }
+  } catch {
+    // ignorar
+  }
+
+  // 3. Tenta copiar do URI de entrada para um arquivo seguro no documentDirectory ou cacheDirectory
+  const targetDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+  const destPath = `${targetDir}capture_proc_${Date.now()}.mp4`;
+  try {
+    await FileSystem.copyAsync({ from: videoUri, to: destPath });
+    const destInfo = await FileSystem.getInfoAsync(destPath);
+    if (destInfo.exists && (destInfo.size ?? 0) > 0) return destPath;
+  } catch {
+    // Falha na cópia — o URI original pode já ser inválido.
+  }
+
+  throw new Error(
+    'O arquivo de vídeo não foi encontrado ou está inacessível. Isso pode ocorrer se o sistema limpou o cache. Grave a filmagem novamente.',
+  );
+}
+
 async function runCapture(taskId: string, videoUri: string, emit: (p: CaptureProgress) => void): Promise<void> {
   const { capture_id: captureId, upload_prefix: uploadPrefix } = await api.startCapture(taskId);
   let player: VideoPlayer | null = null;
+  let stableVideoUri: string | null = null;
   try {
     if (Platform.OS === 'web') {
       throw new Error('A análise de vídeo funciona apenas no app Android/iOS. Faça a conferência manual.');
     }
     emit({ phase: 'preparing', done: 0, total: 0 });
-    player = createVideoPlayer(videoUri);
+
+    // Garante que o vídeo é acessível antes de criar o player.
+    stableVideoUri = await ensureVideoAccessible(videoUri);
+    player = createVideoPlayer(stableVideoUri);
     player.muted = true;
     await waitUntilReady(player);
     const duration = player.duration;
@@ -154,10 +220,18 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     let previousMotion: Float32Array | null = null;
     for (let start = 0; start < times.length; start += CAPTURE_SETTINGS.thumbnailBatch) {
       const batch = times.slice(start, start + CAPTURE_SETTINGS.thumbnailBatch);
-      const thumbnails = await player.generateThumbnailsAsync(batch, {
-        maxWidth: CAPTURE_SETTINGS.analysisMaxDimension,
-        maxHeight: CAPTURE_SETTINGS.analysisMaxDimension,
-      });
+      let thumbnails;
+      try {
+        thumbnails = await player.generateThumbnailsAsync(batch, {
+          maxWidth: CAPTURE_SETTINGS.analysisMaxDimension,
+          maxHeight: CAPTURE_SETTINGS.analysisMaxDimension,
+        });
+      } catch (err: any) {
+        console.error('[Capture] Falha em generateThumbnailsAsync:', err);
+        throw new Error(
+          `Falha ao extrair quadros da filmagem (${err?.message || 'arquivo inacessível'}). Grave o vídeo novamente.`,
+        );
+      }
       for (let i = 0; i < thumbnails.length; i++) {
         const thumbnail = thumbnails[i];
         try {
@@ -195,10 +269,19 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     const frames: Record<string, unknown>[] = [];
     for (let i = 0; i < toUpload.length; i++) {
       const candidate = toUpload[i];
-      const [thumbnail] = await player.generateThumbnailsAsync([candidate.timestamp_seconds], {
-        maxWidth: CAPTURE_SETTINGS.uploadMaxDimension,
-        maxHeight: CAPTURE_SETTINGS.uploadMaxDimension,
-      });
+      let thumbnails;
+      try {
+        thumbnails = await player.generateThumbnailsAsync([candidate.timestamp_seconds], {
+          maxWidth: CAPTURE_SETTINGS.uploadMaxDimension,
+          maxHeight: CAPTURE_SETTINGS.uploadMaxDimension,
+        });
+      } catch (err: any) {
+        console.error('[Capture] Falha em generateThumbnailsAsync (alta resolução):', err);
+        throw new Error(
+          `Falha ao gerar quadros em alta resolução (${err?.message || 'arquivo inacessível'}). Grave o vídeo novamente.`,
+        );
+      }
+      const [thumbnail] = thumbnails;
       let encoded;
       try {
         encoded = await encodeJpeg(thumbnail, CAPTURE_SETTINGS.uploadMaxDimension, CAPTURE_SETTINGS.uploadQuality);
@@ -233,5 +316,9 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     throw error;
   } finally {
     player?.release();
+    // Limpa cópia temporária do vídeo, se foi criada.
+    if (stableVideoUri && stableVideoUri !== videoUri) {
+      FileSystem.deleteAsync(stableVideoUri, { idempotent: true }).catch(() => null);
+    }
   }
 }

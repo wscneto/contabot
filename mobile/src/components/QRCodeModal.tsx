@@ -1,5 +1,7 @@
-import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../constants/theme';
@@ -18,8 +20,18 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   memberName,
   accessCode,
 }) => {
+  const [copied, setCopied] = useState(false);
   // O app já sabe qual projeto Supabase usar; o QR carrega só o código.
   const qrData = JSON.stringify({ code: accessCode });
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(accessCode.trim());
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <Modal
@@ -52,7 +64,23 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
 
           <View style={styles.codeBox}>
             <Text style={styles.codeLabel}>CÓDIGO DE ACESSO</Text>
-            <Text style={styles.codeText}>{accessCode}</Text>
+            <View style={styles.codeRow}>
+              <Text style={styles.codeText}>{accessCode}</Text>
+              <TouchableOpacity
+                onPress={handleCopy}
+                style={[styles.copyBtn, copied && styles.copyBtnSuccess]}
+                accessibilityLabel="Copiar código"
+                testID="copy-code-btn"
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={copied ? 'checkmark' : 'copy-outline'}
+                  size={20}
+                  color={copied ? '#FFFFFF' : colors.primary}
+                />
+              </TouchableOpacity>
+            </View>
+            {copied && <Text style={styles.copiedText}>Código copiado!</Text>}
           </View>
 
           <Button
@@ -132,11 +160,31 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 4,
   },
+  codeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
   codeText: {
     fontSize: 26,
     fontWeight: '800',
     color: colors.primary,
     letterSpacing: 3,
+  },
+  copyBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: colors.primaryLight,
+  },
+  copyBtnSuccess: {
+    backgroundColor: colors.successText,
+  },
+  copiedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.successText,
+    marginTop: 6,
   },
   doneBtn: {
     width: '100%',
