@@ -19,8 +19,10 @@ import {
   candidateTimes,
   computeFingerprint,
   computeQuality,
+  evaluateAnalyzingState,
   frameId,
   type FrameCandidate,
+  IMAGE_UPLOAD_SETTINGS,
   type RgbaImage,
   SELECTION_VERSION,
   selectIdentificationFrames,
@@ -29,6 +31,8 @@ import {
 import { api } from './api';
 import { encodeJpeg } from './images';
 
+export { evaluateAnalyzingState };
+
 export const CAPTURE_SETTINGS = {
   sampleHz: 1,
   maxCandidates: 120,
@@ -36,8 +40,8 @@ export const CAPTURE_SETTINGS = {
   /** Quadros enviados ao servidor (identificação + vizinhos para a contagem). */
   maxUploadFrames: 20,
   analysisMaxDimension: 640,
-  uploadMaxDimension: 1920,
-  uploadQuality: 0.85,
+  uploadMaxDimension: IMAGE_UPLOAD_SETTINGS.frameMaxDimension,
+  uploadQuality: IMAGE_UPLOAD_SETTINGS.frameQuality,
   maxDurationSeconds: 180,
   thumbnailBatch: 4,
 };
@@ -48,6 +52,7 @@ export interface CaptureProgress {
   phase: CapturePhase;
   done: number;
   total: number;
+  captureId?: string;
   error?: string;
 }
 
@@ -260,13 +265,14 @@ export async function ensureVideoAccessible(videoUri: string): Promise<string> {
 
 async function runCapture(taskId: string, videoUri: string, emit: (p: CaptureProgress) => void): Promise<void> {
   const { capture_id: captureId, upload_prefix: uploadPrefix } = await api.startCapture(taskId);
+  const emitWithCapture = (p: CaptureProgress) => emit({ ...p, captureId });
   let player: VideoPlayer | null = null;
   let stableVideoUri: string | null = null;
   try {
     if (Platform.OS === 'web') {
       throw new Error('A análise de vídeo funciona apenas no app Android/iOS. Faça a conferência manual.');
     }
-    emit({ phase: 'preparing', done: 0, total: 0 });
+    emitWithCapture({ phase: 'preparing', done: 0, total: 0 });
 
     // Garante que o vídeo é acessível antes de criar o player e testa compatibilidade nativa de thumbnails
     stableVideoUri = await ensureVideoAccessible(videoUri);
@@ -314,7 +320,7 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
           thumbnail.release();
         }
       }
-      emit({ phase: 'scoring', done: Math.min(times.length, start + batch.length), total: times.length });
+      emitWithCapture({ phase: 'scoring', done: Math.min(times.length, start + batch.length), total: times.length });
     }
     if (!candidates.length) throw new Error('Nenhum frame legível encontrado no vídeo.');
 
@@ -329,7 +335,7 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     const toUpload = uploadIds.map((id) => byId.get(id)!);
 
     // 3. Envio dos quadros escolhidos em resolução cheia.
-    emit({ phase: 'uploading', done: 0, total: toUpload.length });
+    emitWithCapture({ phase: 'uploading', done: 0, total: toUpload.length });
     const frames: Record<string, unknown>[] = [];
     for (let i = 0; i < toUpload.length; i++) {
       const candidate = toUpload[i];
@@ -355,7 +361,7 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
       const path = `${uploadPrefix}${candidate.id}.jpg`;
       await api.uploadFrame(path, encoded.bytes);
       frames.push({ ...candidate, path, width: encoded.width, height: encoded.height });
-      emit({ phase: 'uploading', done: i + 1, total: toUpload.length });
+      emitWithCapture({ phase: 'uploading', done: i + 1, total: toUpload.length });
     }
 
     await api.registerCaptureFrames(captureId, frames, selectedIds, primaryId, {
@@ -373,7 +379,7 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     });
 
     // 4. Análise no servidor (identificar → contar).
-    emit({ phase: 'analyzing', done: 0, total: 0 });
+    emitWithCapture({ phase: 'analyzing', done: 0, total: 0 });
     await api.analyzeCapture(captureId);
   } catch (error) {
     await api.failCapture(captureId, messageOf(error)).catch(() => null);

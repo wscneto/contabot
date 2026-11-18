@@ -98,8 +98,67 @@ Deno.test('identificação exige todos os SKUs, motivo e evidência para present
   assertThrows(() => parseIdentification(noEvidence, 'video-1', ['sku-a'], ['frame-1']), Error, 'evidência');
 });
 
-Deno.test('validateStage converte violações em ProviderError', () => {
-  assertThrows(() => validateStage('count', {}, 'v', ['s'], ['f']), ProviderError, 'viola o esquema');
+Deno.test('validateStage converte violações em ProviderError e preserva a causa interna', () => {
+  const err = assertThrows(() => validateStage('count', {}, 'v', ['s'], ['f']), ProviderError, 'viola o esquema');
+  assert(err.cause instanceof Error);
+  assert(err.cause.message.includes('CountResult'));
+});
+
+Deno.test('chat instrui a não ecoar o JSON Schema e faz 1 retry corretivo quando o modelo devolve o próprio schema', async () => {
+  const captured: Json[] = [];
+  const echoedSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: { video_id: { type: 'string' } },
+    required: ['video_id', 'matches', 'unknown_products'],
+  };
+  const validAnswer = {
+    video_id: 'video-1',
+    matches: [{ sku_id: 'sku-a', status: 'present', reason: 'Visível.', evidence_frame_ids: ['frame-2'] }],
+    unknown_products: [],
+  };
+  const responses = [echoedSchema, validAnswer];
+  const seqFetch = ((_url: string, req: RequestInit) => {
+    captured.push(JSON.parse(String(req.body)));
+    const next = responses.shift() ?? echoedSchema;
+    const body = {
+      id: `req-${captured.length}`,
+      model: 'modelo-x',
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(next) } }],
+    };
+    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  }) as typeof fetch;
+
+  const result = await chat(seqFetch).identify(video, catalog, frames);
+  assertEquals(result.prediction.matches[0].status, 'present');
+  assertEquals(captured.length, 2);
+  // O system prompt deve conter exemplo concreto e proibição de devolver as chaves do JSON Schema
+  assert(captured[0].messages[0].content.includes('NUNCA retorne a definição do esquema'));
+  // A 2ª tentativa deve incluir a resposta incorreta e o erro específico de validação para autocorreção
+  assertEquals(captured[1].messages.length, 4);
+  assertEquals(captured[1].messages[2].role, 'assistant');
+  assertEquals(captured[1].messages[3].role, 'user');
+  assert(captured[1].messages[3].content.includes('campos inesperados'));
+
+  // Se continuar inválido na 2ª tentativa, falha fechado após o único retry (2 chamadas no total)
+  const alwaysBadCalls: Json[] = [];
+  const alwaysBadFetch = ((_url: string, req: RequestInit) => {
+    alwaysBadCalls.push(JSON.parse(String(req.body)));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          id: 'req-bad',
+          model: 'modelo-x',
+          usage: {},
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(echoedSchema) } }],
+        }),
+        { status: 200 },
+      ),
+    );
+  }) as typeof fetch;
+  await assertRejects(() => chat(alwaysBadFetch).identify(video, catalog, frames), ProviderError, 'viola o esquema');
+  assertEquals(alwaysBadCalls.length, 2);
 });
 
 // ---------------------------------------------------------------------------

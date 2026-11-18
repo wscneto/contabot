@@ -9,12 +9,17 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../../services/api';
 import { useAuth } from '../../../../context/AuthContext';
-import { type CaptureProgress, getCaptureJob, subscribeCaptureJob } from '../../../../services/capture';
+import {
+  type CaptureProgress,
+  evaluateAnalyzingState,
+  getCaptureJob,
+  subscribeCaptureJob,
+} from '../../../../services/capture';
 import { Card } from '../../../../components/Card';
 import { Button } from '../../../../components/Button';
 import { colors, typography } from '../../../../constants/theme';
@@ -22,6 +27,7 @@ import { colors, typography } from '../../../../constants/theme';
 export default function AnalyzingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const [local, setLocal] = useState<CaptureProgress | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -39,7 +45,7 @@ export default function AnalyzingScreen() {
   const capture = task?.capture;
   const stage = capture?.stage;
   // Falha antes de a captura existir (ex.: contagem já enviada por outra pessoa).
-  const startFailed = local?.phase === 'failed' && task && task.status !== 'analyzing';
+  const startFailed = Boolean(local?.phase === 'failed' && task && task.status !== 'analyzing');
   // Envio interrompido neste aparelho: a captura espera quadros que nunca vão
   // chegar (app fechado no meio, ou falha de rede ao avisar o servidor). Sem
   // isto, a tela ficaria esperando até a captura expirar no servidor.
@@ -51,45 +57,41 @@ export default function AnalyzingScreen() {
       (!(id && getCaptureJob(id)) || local?.phase === 'failed'),
   );
 
-  // Identifica qualquer falha (no dispositivo ou no servidor)
-  const isFailed = Boolean(
-    capture?.status === 'failed' ||
-      local?.phase === 'failed' ||
-      startFailed ||
-      interrupted,
-  );
+  const screenState = evaluateAnalyzingState({
+    taskStatus: task?.status,
+    captureId: capture?.id,
+    captureStatus: capture?.status,
+    localPhase: local?.phase,
+    localCaptureId: local?.captureId,
+    interrupted,
+    startFailed,
+  });
+  const { isFailed, serverFailed, isCaptureDone, shouldRedirect } = screenState;
 
   useEffect(() => {
-    if (!task) return;
-
-    // Se houve qualquer falha (no celular ou no servidor), NUNCA redireciona automaticamente!
-    // O usuário precisa ver a mensagem de erro e escolher se quer filmar novamente ou conferir manualmente.
-    if (isFailed) return;
-
-    // Redirecionamento automático só ocorre quando a análise da IA foi CONCLUÍDA com sucesso
-    // (capture.status === 'completed') ou quando a tarefa já foi finalizada/aprovada.
-    const isSuccess = task.status === 'review' && capture?.status === 'completed';
-    const isFinalized = task.status === 'submitted' || task.status === 'approved';
-
-    if (isSuccess || isFinalized) {
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
-      }
-      router.replace(`/(employee)/task/${id}/review`);
+    if (!task || !shouldRedirect) return;
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
     }
-  }, [task?.status, capture?.status, isFailed, id, router]);
+    void queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
+    router.replace(`/(employee)/task/${id}/review`);
+  }, [task, shouldRedirect, id, queryClient, router]);
 
   const resolveInterrupted = async (next: 'camera' | 'review') => {
     if (resolving) return;
     setResolving(true);
     try {
       if (next === 'camera') {
-        if (capture?.id) {
+        if (capture?.id && capture.status === 'processing') {
           await api.failCapture(capture.id, 'Envio interrompido antes de os quadros chegarem. Vídeo gravado novamente.').catch(() => null);
         }
+        await queryClient.invalidateQueries({ queryKey: ['task_analyzing', id] });
+        await queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
         router.replace(`/(employee)/task/${id}/camera`);
       } else {
         await api.switchToManual(id).catch(() => null);
+        await queryClient.invalidateQueries({ queryKey: ['task_analyzing', id] });
+        await queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
         router.replace(`/(employee)/task/${id}/review`);
       }
     } catch (error) {
@@ -102,13 +104,13 @@ export default function AnalyzingScreen() {
   };
 
   const getStageInfo = () => {
-    if (capture?.status === 'failed' || local?.phase === 'failed' || interrupted) {
+    if (serverFailed || local?.phase === 'failed' || interrupted) {
       return {
         step: 'Envio interrompido',
         title: 'Os quadros do vídeo não foram enviados',
         desc:
           local?.error ||
-          capture?.error ||
+          (serverFailed ? capture?.error : undefined) ||
           'Ocorreu uma falha no envio ou processamento do vídeo. Filme novamente ou faça a conferência manual.',
       };
     }
@@ -133,6 +135,13 @@ export default function AnalyzingScreen() {
         step: 'Etapa 1 de 3',
         title: 'Enviando quadros escolhidos…',
         desc: `${local.done} de ${local.total} imagens enviadas. Mantenha o app aberto.`,
+      };
+    }
+    if (isCaptureDone) {
+      return {
+        step: 'Concluído',
+        title: 'Análise concluída!',
+        desc: 'Abrindo a tela de conferência…',
       };
     }
     switch (stage) {

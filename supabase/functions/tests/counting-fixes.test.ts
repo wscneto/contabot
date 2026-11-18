@@ -1,4 +1,9 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
+import {
+  evaluateAnalyzingState,
+  IMAGE_UPLOAD_SETTINGS,
+  shouldAutoRedirectToReview,
+} from '../_shared/frame-selection.ts';
 
 // -------------------------------------------------------------
 // Test 1: Employee Access Code copying & formatting (Item 4)
@@ -132,40 +137,8 @@ export async function resolveAccessibleVideoUri(
 }
 
 // -------------------------------------------------------------
-// Test 3: Analyzing screen redirect guard (Item 6)
+// Test 3: Analyzing screen redirect guard & stale cache protection (Item 6)
 // -------------------------------------------------------------
-export interface TaskRedirectContext {
-  taskStatus?: string;
-  captureStatus?: string;
-  localPhase?: string;
-  interrupted?: boolean;
-  startFailed?: boolean;
-}
-
-export function shouldAutoRedirectToReview(ctx: TaskRedirectContext): boolean {
-  // If there is ANY error or interrupted state, NEVER redirect automatically!
-  const hasError =
-    ctx.captureStatus === 'failed' ||
-    ctx.localPhase === 'failed' ||
-    Boolean(ctx.interrupted) ||
-    Boolean(ctx.startFailed);
-
-  if (hasError) {
-    return false;
-  }
-
-  // Submitted or approved tasks always go to review/results
-  if (ctx.taskStatus === 'submitted' || ctx.taskStatus === 'approved') {
-    return true;
-  }
-
-  // A task in 'review' only auto-redirects if AI capture completed successfully
-  if (ctx.taskStatus === 'review') {
-    return ctx.captureStatus === 'completed';
-  }
-
-  return false;
-}
 
 // =============================================================
 // DENO TESTS
@@ -234,8 +207,12 @@ Deno.test('Item 5: lança erro amigável se arquivo de vídeo foi limpo ou não 
   assert(errorMsg.includes('O arquivo de vídeo não foi encontrado'));
 });
 
-Deno.test('Item 6: redirecionamento automático ocorre APENAS no sucesso da IA', () => {
-  // Sucesso: capture.status === 'completed' e taskStatus === 'review'
+Deno.test('Item 6: redirecionamento automático ocorre no sucesso da IA (done ou completed)', () => {
+  // Sucesso real do banco (pipeline_finish grava status = 'done') e legado ('completed')
+  assertEquals(
+    shouldAutoRedirectToReview({ taskStatus: 'review', captureStatus: 'done' }),
+    true
+  );
   assertEquals(
     shouldAutoRedirectToReview({ taskStatus: 'review', captureStatus: 'completed' }),
     true
@@ -280,4 +257,46 @@ Deno.test('Item 6: NUNCA redireciona automaticamente quando envio foi interrompi
     shouldAutoRedirectToReview({ taskStatus: 'analyzing', interrupted: true }),
     false
   );
+});
+
+Deno.test('Item 6: ao refilmar, falha antiga em cache é ignorada enquanto o novo envio local está ativo', () => {
+  for (const phase of ['preparing', 'scoring', 'uploading'] as const) {
+    const state = evaluateAnalyzingState({
+      taskStatus: 'review',
+      captureId: 'old-failed-capture',
+      captureStatus: 'failed',
+      localPhase: phase,
+    });
+    assertEquals(state.isFailed, false);
+    assertEquals(state.shouldRedirect, false);
+  }
+
+  // Se o job local já tem um novo captureId mas o cache da query ainda traz o captureId antigo falhado
+  const staleDuringAnalyzing = evaluateAnalyzingState({
+    taskStatus: 'review',
+    captureId: 'old-failed-capture',
+    captureStatus: 'failed',
+    localPhase: 'analyzing',
+    localCaptureId: 'new-capture-id',
+  });
+  assertEquals(staleDuringAnalyzing.isFailed, false);
+  assertEquals(staleDuringAnalyzing.shouldRedirect, false);
+
+  // Quando o captureId do servidor é o mesmo e falha, aí sim reporta falha
+  const realServerFail = evaluateAnalyzingState({
+    taskStatus: 'review',
+    captureId: 'new-capture-id',
+    captureStatus: 'failed',
+    localPhase: 'done',
+    localCaptureId: 'new-capture-id',
+  });
+  assertEquals(realServerFail.isFailed, true);
+  assertEquals(realServerFail.shouldRedirect, false);
+});
+
+Deno.test('Otimização de imagens: dimensões e qualidade de upload reduzidas para 1024px', () => {
+  assertEquals(IMAGE_UPLOAD_SETTINGS.frameMaxDimension, 1024);
+  assertEquals(IMAGE_UPLOAD_SETTINGS.frameQuality, 0.75);
+  assertEquals(IMAGE_UPLOAD_SETTINGS.productPhotoMaxDimension, 1024);
+  assertEquals(IMAGE_UPLOAD_SETTINGS.productPhotoQuality, 0.78);
 });
