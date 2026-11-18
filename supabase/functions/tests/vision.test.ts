@@ -341,3 +341,51 @@ Deno.test('itens: ok chega preenchido, dúvida e ausência ficam para conferênc
   assertEquals(items[3].ai_note, 'motivo d');
   assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing'), true);
 });
+
+Deno.test('notas longas da IA não são cortadas em 300 caracteres em countItems nem noMatchItems', () => {
+  const frames = [stored('f0001', 0, 1)];
+  const skus = ['a', 'b'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
+  const longCountReason =
+    'Contagem visível parcial no frame f0001: quatro unidades físicas identificadas com nitidez na prateleira superior, ' +
+    'incluindo marca, variante e peso de 500 g compatíveis com a foto de referência enviada no catálogo oficial da loja. ' +
+    'No entanto, há várias caixas parcialmente encobertas atrás da fileira frontal e a varredura curta não mostra a lateral direita completa, ' +
+    'impedindo afirmar o total do estoque sem conferência manual cuidadosa.';
+  const longMissReason =
+    'Os produtos observados nos quadros enviados pertencem a outra marca e outra embalagem (sachês azuis e brancos de açúcar 5 g), ' +
+    'não correspondendo ao item cadastrado na referência com frasco vermelho e tampa preta de 500 ml, embora compartilhem a mesma gôndola ' +
+    'próxima ao balcão principal durante toda a gravação contínua que foi enviada e analisada pela inteligência artificial.';
+  assert(longCountReason.length > 350);
+  assert(longMissReason.length > 350);
+
+  const identification = {
+    video_id: 'cap',
+    matches: [
+      { sku_id: 'a', status: 'present' as const, reason: 'ok', evidence_frame_ids: ['f0001'] },
+      { sku_id: 'b', status: 'absent' as const, reason: longMissReason, evidence_frame_ids: [] },
+    ],
+    unknown_products: [],
+  };
+  const result = {
+    video_id: 'cap',
+    coverage_complete: false,
+    overlap_resolved: true,
+    unknown_products: [],
+    counts: [
+      {
+        sku_id: 'a',
+        quantity: 4,
+        incomplete: true,
+        needs_review: true,
+        reason: longCountReason,
+        evidence_frame_ids: ['f0001'],
+      },
+    ],
+  };
+
+  const counted = countItems(skus, identification, result, frames);
+  assertEquals(counted[0].ai_note, longCountReason);
+  assertEquals(counted[1].ai_note, longMissReason);
+
+  const missed = noMatchItems([skus[1]], [identification.matches[1]]);
+  assertEquals(missed[0].ai_note, longMissReason);
+});

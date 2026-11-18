@@ -168,6 +168,7 @@ export default function ReviewScreen() {
             <Ionicons
               name={item.ai_status === 'check' ? 'warning-outline' : 'information-circle-outline'}
               size={15}
+              style={styles.aiNoteIcon}
               color={
                 item.ai_status === 'check'
                   ? colors.warningText
@@ -182,7 +183,6 @@ export default function ReviewScreen() {
                 item.ai_status === 'check' && { color: colors.warningText },
                 item.ai_status === 'missing' && { color: colors.dangerText },
               ]}
-              numberOfLines={2}
             >
               {item.ai_note}
             </Text>
@@ -427,12 +427,15 @@ const styles = StyleSheet.create({
   },
   aiNoteBox: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
     marginBottom: 10,
+  },
+  aiNoteIcon: {
+    marginTop: 2,
   },
   aiNoteWarning: {
     backgroundColor: colors.warningBg,
@@ -442,6 +445,7 @@ const styles = StyleSheet.create({
   },
   aiNoteText: {
     fontSize: 12,
+    lineHeight: 17,
     color: colors.textSecondary,
     marginLeft: 6,
     flex: 1,
