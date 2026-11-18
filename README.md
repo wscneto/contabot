@@ -14,7 +14,7 @@ Projetado especificamente para as operações do dia a dia no varejo, dividindo 
 contabot/
 ├── mobile/                  # App Expo SDK 58 (Expo Router)
 │   ├── src/
-│   │   ├── app/             # Rotas: (auth), (employee), (manager)
+│   │   ├── app/             # Rotas: (auth), (employee), (manager) e task/ (contagem, usada pelos dois)
 │   │   ├── components/      # Design System (Button, Card, Stepper, Badge, QRCodeModal, Input)
 │   │   ├── lib/supabase.ts  # Cliente Supabase (sessão persistida com expo-sqlite)
 │   │   └── services/

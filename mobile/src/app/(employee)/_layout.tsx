@@ -11,10 +11,6 @@ export default function EmployeeLayout() {
       }}
     >
       <Stack.Screen name="index" />
-      <Stack.Screen name="task/[id]/index" />
-      <Stack.Screen name="task/[id]/camera" options={{ presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="task/[id]/analyzing" options={{ gestureEnabled: false }} />
-      <Stack.Screen name="task/[id]/review" />
     </Stack>
   );
 }

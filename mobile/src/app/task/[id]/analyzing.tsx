@@ -12,12 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../../../services/api';
-import { useAuth } from '../../../../context/AuthContext';
-import { type CaptureProgress, getCaptureJob, subscribeCaptureJob } from '../../../../services/capture';
-import { Card } from '../../../../components/Card';
-import { Button } from '../../../../components/Button';
-import { colors, typography } from '../../../../constants/theme';
+import { api } from '../../../services/api';
+import { useAuth } from '../../../context/AuthContext';
+import { type CaptureProgress, getCaptureJob, subscribeCaptureJob } from '../../../services/capture';
+import { Card } from '../../../components/Card';
+import { Button } from '../../../components/Button';
+import { colors, typography } from '../../../constants/theme';
 
 export default function AnalyzingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -43,7 +43,7 @@ export default function AnalyzingScreen() {
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
       }
-      router.replace(`/(employee)/task/${id}/review`);
+      router.replace(`/task/${id}/review`);
     }
   }, [task?.status, id, router]);
 
@@ -68,10 +68,10 @@ export default function AnalyzingScreen() {
     try {
       if (next === 'camera') {
         await api.failCapture(capture.id, 'Envio interrompido antes de os quadros chegarem. Vídeo gravado novamente.');
-        router.replace(`/(employee)/task/${id}/camera`);
+        router.replace(`/task/${id}/camera`);
       } else {
         await api.switchToManual(id);
-        router.replace(`/(employee)/task/${id}/review`);
+        router.replace(`/task/${id}/review`);
       }
     } catch (error) {
       setResolving(false);
@@ -189,7 +189,7 @@ export default function AnalyzingScreen() {
         ) : startFailed ? (
           <Button
             title="Voltar para a contagem"
-            onPress={() => router.replace(`/(employee)/task/${id}`)}
+            onPress={() => router.replace(`/task/${id}`)}
             variant="outline"
             style={styles.skipBtn}
           />
@@ -198,7 +198,7 @@ export default function AnalyzingScreen() {
             title="Conferir Manualmente (Pular IA)"
             onPress={async () => {
               await api.switchToManual(id).catch(() => null);
-              router.replace(`/(employee)/task/${id}/review`);
+              router.replace(`/task/${id}/review`);
             }}
             variant="ghost"
             style={styles.skipBtn}

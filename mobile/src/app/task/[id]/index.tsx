@@ -14,14 +14,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { api } from '../../../../services/api';
-import { CAPTURE_SETTINGS, startCaptureJob } from '../../../../services/capture';
-import { useAuth } from '../../../../context/AuthContext';
-import { Header } from '../../../../components/Header';
-import { Badge } from '../../../../components/Badge';
-import { Button } from '../../../../components/Button';
-import { Card } from '../../../../components/Card';
-import { colors, typography } from '../../../../constants/theme';
+import { api } from '../../../services/api';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../services/capture';
+import { useAuth } from '../../../context/AuthContext';
+import { Header } from '../../../components/Header';
+import { Badge } from '../../../components/Badge';
+import { Button } from '../../../components/Button';
+import { Card } from '../../../components/Card';
+import { colors, typography } from '../../../constants/theme';
 
 export default function TaskStartScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -76,7 +76,7 @@ export default function TaskStartScreen() {
         }
         setUploadingGallery(true);
         startCaptureJob(task.id, asset.uri);
-        router.replace(`/(employee)/task/${task.id}/analyzing`);
+        router.replace(`/task/${task.id}/analyzing`);
       }
     } catch (err: any) {
       Alert.alert('Erro ao enviar vídeo', err.message || 'Não foi possível enviar o vídeo.');
@@ -88,7 +88,7 @@ export default function TaskStartScreen() {
   const handleManualCounting = async () => {
     try {
       await api.switchToManual(task.id);
-      router.replace(`/(employee)/task/${task.id}/review`);
+      router.replace(`/task/${task.id}/review`);
     } catch (err: any) {
       Alert.alert('Erro', err.message || 'Não foi possível iniciar contagem manual.');
     }
@@ -139,7 +139,7 @@ export default function TaskStartScreen() {
             </Text>
             <Button
               title="Acompanhar Análise"
-              onPress={() => router.push(`/(employee)/task/${task.id}/analyzing`)}
+              onPress={() => router.push(`/task/${task.id}/analyzing`)}
               size="lg"
             />
           </Card>
@@ -153,7 +153,7 @@ export default function TaskStartScreen() {
             </Text>
             <Button
               title="Ir para Conferência"
-              onPress={() => router.push(`/(employee)/task/${task.id}/review`)}
+              onPress={() => router.push(`/task/${task.id}/review`)}
               size="lg"
             />
           </Card>
@@ -167,7 +167,7 @@ export default function TaskStartScreen() {
             {/* Method 1: Camera (Primary) */}
             <TouchableOpacity
               style={styles.methodCardPrimary}
-              onPress={() => router.push(`/(employee)/task/${task.id}/camera`)}
+              onPress={() => router.push(`/task/${task.id}/camera`)}
             >
               <View style={styles.methodIconCircle}>
                 <Ionicons name="videocam" size={28} color={colors.surface} />

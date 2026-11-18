@@ -18,6 +18,7 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" options={{ headerShown: false }} />
             <Stack.Screen name="(manager)" options={{ headerShown: false }} />
             <Stack.Screen name="(employee)" options={{ headerShown: false }} />
+            <Stack.Screen name="task" options={{ headerShown: false }} />
           </Stack>
         </AuthProvider>
       </QueryClientProvider>
