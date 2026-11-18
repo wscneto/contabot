@@ -1,0 +1,22 @@
+# Virtual Environments & Python
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.coverage
+contabot/
+tests/
+scripts/
+docs/
+samples/
+data/
+demo/
+supabase/
+
+# Dependencies & Build artifacts
+node_modules/
+.expo/
+dist/
+web-build/
+.git/
