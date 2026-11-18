@@ -23,6 +23,7 @@ import {
   frameId,
   type FrameCandidate,
   IMAGE_UPLOAD_SETTINGS,
+  initialReviewCounts,
   type RgbaImage,
   SELECTION_VERSION,
   selectIdentificationFrames,
@@ -31,7 +32,7 @@ import {
 import { api } from './api';
 import { encodeJpeg } from './images';
 
-export { evaluateAnalyzingState };
+export { evaluateAnalyzingState, initialReviewCounts };
 
 export const CAPTURE_SETTINGS = {
   sampleHz: 1,

@@ -16,6 +16,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { api } from '../../../../services/api';
+import { initialReviewCounts } from '../../../../services/capture';
 import { Header } from '../../../../components/Header';
 import { Badge } from '../../../../components/Badge';
 import { Stepper } from '../../../../components/Stepper';
@@ -44,17 +45,7 @@ export default function ReviewScreen() {
   // Initialize counts from task items
   useEffect(() => {
     if (task && task.items) {
-      const initialCounts: Record<string, number | null> = {};
-      for (const item of task.items) {
-        if (item.counted !== null && item.counted !== undefined) {
-          initialCounts[item.product_id] = item.counted;
-        } else if (item.ai_status === 'ok' && item.ai_quantity !== null) {
-          initialCounts[item.product_id] = item.ai_quantity;
-        } else {
-          initialCounts[item.product_id] = null;
-        }
-      }
-      setCounts(initialCounts);
+      setCounts(initialReviewCounts(task.items));
     }
   }, [task]);
 

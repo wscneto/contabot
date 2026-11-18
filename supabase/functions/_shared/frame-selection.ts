@@ -87,6 +87,23 @@ export function shouldAutoRedirectToReview(ctx: TaskRedirectContext): boolean {
   return evaluateAnalyzingState(ctx).shouldRedirect;
 }
 
+/** Preenche os campos da conferência usando o valor já salvo ou qualquer quantidade sugerida pela IA. */
+export function initialReviewCounts(
+  items: ReadonlyArray<{ product_id: string; counted?: number | null; ai_quantity?: number | null; ai_status?: string }>,
+): Record<string, number | null> {
+  const initialCounts: Record<string, number | null> = {};
+  for (const item of items) {
+    if (item.counted !== null && item.counted !== undefined) {
+      initialCounts[item.product_id] = item.counted;
+    } else if (item.ai_quantity !== null && item.ai_quantity !== undefined) {
+      initialCounts[item.product_id] = item.ai_quantity;
+    } else {
+      initialCounts[item.product_id] = null;
+    }
+  }
+  return initialCounts;
+}
+
 export interface FrameMetrics {
   sharpness: number;
   exposure: number;

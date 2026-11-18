@@ -159,8 +159,8 @@ export function countItems(
       ai_status: status,
       ai_note: normalizeNote(count.reason, ''),
       evidence_frame: firstEvidence ? pathById.get(firstEvidence) ?? null : null,
-      // Itens "ok" já chegam preenchidos para a conferência do funcionário.
-      counted: status === 'ok' ? count.quantity : null,
+      // Qualquer item com quantidade sugerida pela IA (ok ou check) já chega preenchido para conferência.
+      counted: count.quantity,
     };
   });
 }

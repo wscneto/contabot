@@ -2,6 +2,7 @@ import { assert, assertEquals } from 'jsr:@std/assert@1';
 import {
   evaluateAnalyzingState,
   IMAGE_UPLOAD_SETTINGS,
+  initialReviewCounts,
   shouldAutoRedirectToReview,
 } from '../_shared/frame-selection.ts';
 
@@ -299,4 +300,24 @@ Deno.test('Otimização de imagens: dimensões e qualidade de upload reduzidas p
   assertEquals(IMAGE_UPLOAD_SETTINGS.frameQuality, 0.75);
   assertEquals(IMAGE_UPLOAD_SETTINGS.productPhotoMaxDimension, 1024);
   assertEquals(IMAGE_UPLOAD_SETTINGS.productPhotoQuality, 0.78);
+});
+
+Deno.test('Conferência: preenche quantidade conferida automaticamente com a sugestão da IA (ok, check ou 0)', () => {
+  const counts = initialReviewCounts([
+    { product_id: 'p-ok', ai_status: 'ok', ai_quantity: 5, counted: 5 },
+    { product_id: 'p-check', ai_status: 'check', ai_quantity: 4, counted: null },
+    { product_id: 'p-zero', ai_status: 'check', ai_quantity: 0, counted: null },
+    { product_id: 'p-edited', ai_status: 'check', ai_quantity: 4, counted: 7 },
+    { product_id: 'p-edited-zero', ai_status: 'ok', ai_quantity: 3, counted: 0 },
+    { product_id: 'p-missing', ai_status: 'missing', ai_quantity: null, counted: null },
+  ]);
+
+  assertEquals(counts, {
+    'p-ok': 5,
+    'p-check': 4,
+    'p-zero': 0,
+    'p-edited': 7,
+    'p-edited-zero': 0,
+    'p-missing': null,
+  });
 });

@@ -316,7 +316,7 @@ Deno.test('quadros de contagem somam identificação e vizinhos das evidências'
   assertThrows(() => countingFrames(pool, ident, skus, identification, 2, 4), ProviderError, 'Produtos demais');
 });
 
-Deno.test('itens: ok chega preenchido, dúvida e ausência ficam para conferência', () => {
+Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fica sem quantidade', () => {
   const frames = [stored('f0001', 0, 1)];
   const skus = ['a', 'b', 'c', 'd'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
   const identification = {
@@ -336,7 +336,7 @@ Deno.test('itens: ok chega preenchido, dúvida e ausência ficam para conferênc
     ],
   };
   const items = countItems(skus, identification, result, frames);
-  assertEquals(items.map((i) => [i.ai_status, i.counted]), [['ok', 5], ['check', null], ['missing', null], ['missing', null]]);
+  assertEquals(items.map((i) => [i.ai_status, i.counted]), [['ok', 5], ['check', 2], ['missing', null], ['missing', null]]);
   assertEquals(items[0].evidence_frame, 'loja/captures/cap/f0001.jpg');
   assertEquals(items[3].ai_note, 'motivo d');
   assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing'), true);
