@@ -14,11 +14,11 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '../../../../context/AuthContext';
-import { api } from '../../../../services/api';
-import { CAPTURE_SETTINGS, startCaptureJob } from '../../../../services/capture';
-import { Button } from '../../../../components/Button';
-import { colors } from '../../../../constants/theme';
+import { useAuth } from '../../../context/AuthContext';
+import { api } from '../../../services/api';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../services/capture';
+import { Button } from '../../../components/Button';
+import { colors } from '../../../constants/theme';
 
 /** Segundos iniciais da gravação dedicados à vista de cima da prateleira. */
 const OVERVIEW_SECONDS = 5;
@@ -133,7 +133,7 @@ function CameraRecorderContent() {
     try {
       // Seleção de quadros, envio e análise seguem em segundo plano.
       startCaptureJob(id, recordedUri);
-      router.replace(`/(employee)/task/${id}/analyzing`);
+      router.replace(`/task/${id}/analyzing`);
     } catch (err: any) {
       Alert.alert('Erro ao enviar vídeo', err.message || 'Falha no envio.');
       setIsUploading(false);

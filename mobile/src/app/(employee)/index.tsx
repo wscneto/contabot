@@ -55,7 +55,7 @@ export default function EmployeeHomeScreen() {
     return (
       <Card
         style={[styles.taskCard, isRecount && styles.recountCard]}
-        onPress={() => router.push(`/(employee)/task/${item.id}`)}
+        onPress={() => router.push(`/task/${item.id}`)}
       >
         {isRecount && (
           <View style={styles.recountBanner}>

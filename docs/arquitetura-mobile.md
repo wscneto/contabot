@@ -164,7 +164,8 @@ O repositório já está reorganizado pelo PR #1. A versão web antiga saiu da `
 ```text
 contabot/
   mobile/src/app/(auth)/        Login e cadastro do gerente
-  mobile/src/app/(employee)/    Contagens, câmera, análise e conferência
+  mobile/src/app/(employee)/    Lista de contagens do funcionário
+  mobile/src/app/task/          Câmera, análise e conferência (funcionário e gerente)
   mobile/src/app/(manager)/     Painel, contagens, produtos, áreas e equipe
   mobile/src/services/          API, captura, seleção de frames e imagens
   supabase/migrations/          Tabelas, RLS e RPCs
