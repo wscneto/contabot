@@ -122,6 +122,20 @@ export interface ImportProductItem {
   min_stock?: number | null;
 }
 
+export interface ApprovedTaskExportItem {
+  barcode: string;
+  name: string;
+  variant?: string;
+  quantity: number;
+}
+
+export interface ApprovedTaskExport {
+  id: string;
+  area_name: string;
+  approved_at: string | null;
+  items: ApprovedTaskExportItem[];
+}
+
 export const api = {
   /** URL já assinada pelas consultas; mantido para as telas exibirem imagens. */
   resolveMediaUrl(url: string | null | undefined): string | null {
@@ -204,6 +218,8 @@ export const api = {
     rpc('submit_task', { p_id: id, p_counts: counts }),
   approveTask: (id: string, counts?: Record<string, number | null>) =>
     rpc('approve_task', { p_id: id, p_counts: counts ?? null }),
+  exportApprovedTask: (id: string) =>
+    rpc<ApprovedTaskExport>('export_approved_task', { p_id: id }, false),
   requestRecount: (id: string, note: string) => rpc('request_recount', { p_id: id, p_note: note }),
   getDashboard: () => rpc('get_dashboard'),
 

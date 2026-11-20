@@ -11,15 +11,22 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
+import { exportApprovedTaskCsv } from '../../../utils/exportCsv';
+import { showMessage } from '../../../utils/confirm';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
 import { Card } from '../../../components/Card';
+import { ExportCsvButton } from '../../../components/ExportCsvButton';
 import { colors, typography } from '../../../constants/theme';
 
 export default function ManagerTasksScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const isManager = user?.role === 'manager';
   const [filterTab, setFilterTab] = useState<'all' | 'submitted' | 'open' | 'approved'>('all');
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const { data: tasks = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['manager_tasks'],
@@ -34,7 +41,22 @@ export default function ManagerTasksScreen() {
     return true;
   });
 
+  const handleExportCsv = async (taskId: string) => {
+    if (!isManager || exportingId) return;
+    setExportingId(taskId);
+    try {
+      await exportApprovedTaskCsv(taskId);
+    } catch (err: any) {
+      showMessage('Erro ao exportar CSV', err.message || 'Não foi possível exportar a contagem.');
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   const renderItem = ({ item }: { item: any }) => {
+    const canExport = isManager && item.status === 'approved';
+    const isExporting = exportingId === item.id;
+
     return (
       <Card
         style={[styles.card, item.status === 'submitted' && styles.submittedCard]}
@@ -67,7 +89,17 @@ export default function ManagerTasksScreen() {
           <Text style={styles.itemCountText}>
             {item.item_count} produtos na área
           </Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          <View style={styles.footerActions}>
+            {canExport && (
+              <ExportCsvButton
+                loading={isExporting}
+                onPress={() => {
+                  void handleExportCsv(item.id);
+                }}
+              />
+            )}
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
         </View>
       </Card>
     );
@@ -222,6 +254,11 @@ const styles = StyleSheet.create({
   itemCountText: {
     fontSize: 13,
     color: colors.textMuted,
+  },
+  footerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   emptyContainer: {
     alignItems: 'center',

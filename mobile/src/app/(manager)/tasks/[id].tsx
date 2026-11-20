@@ -14,11 +14,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
+import { exportApprovedTaskCsv } from '../../../utils/exportCsv';
+import { showMessage } from '../../../utils/confirm';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
 import { Card } from '../../../components/Card';
 import { Button } from '../../../components/Button';
+import { ExportCsvButton } from '../../../components/ExportCsvButton';
 import { Input } from '../../../components/Input';
 import { colors, typography } from '../../../constants/theme';
 
@@ -26,8 +30,10 @@ export default function ManagerTaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const [approving, setApproving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [recounting, setRecounting] = useState(false);
   const [recountModal, setRecountModal] = useState(false);
   const [recountNote, setRecountNote] = useState('');
@@ -50,8 +56,21 @@ export default function ManagerTaskDetailScreen() {
     );
   }
 
+  const isManager = user?.role === 'manager';
   const isSubmitted = task.status === 'submitted';
   const isApproved = task.status === 'approved';
+
+  const handleExportCsv = async () => {
+    if (!isManager || !isApproved || exporting) return;
+    setExporting(true);
+    try {
+      await exportApprovedTaskCsv(id);
+    } catch (err: any) {
+      showMessage('Erro ao exportar CSV', err.message || 'Não foi possível exportar a contagem.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleApprove = async () => {
     Alert.alert(
@@ -162,10 +181,24 @@ export default function ManagerTaskDetailScreen() {
             </View>
           )}
 
-          {task.due_date && (
-            <Text style={styles.dueDateText}>
-              Prazo limite: {task.due_date} {task.overdue ? '(Atrasada)' : ''}
-            </Text>
+          {(task.due_date || (isApproved && isManager)) && (
+            <View style={styles.summaryFooter}>
+              {task.due_date ? (
+                <Text style={styles.dueDateText}>
+                  Prazo limite: {task.due_date} {task.overdue ? '(Atrasada)' : ''}
+                </Text>
+              ) : (
+                <View />
+              )}
+              {isApproved && isManager && (
+                <ExportCsvButton
+                  loading={exporting}
+                  onPress={() => {
+                    void handleExportCsv();
+                  }}
+                />
+              )}
+            </View>
           )}
         </Card>
 
@@ -399,13 +432,20 @@ const styles = StyleSheet.create({
   bold: {
     fontWeight: '700',
   },
-  dueDateText: {
-    fontSize: 12,
-    color: colors.textMuted,
+  summaryFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
     marginTop: 10,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceBorder,
-    paddingTop: 8,
+    paddingTop: 10,
+  },
+  dueDateText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    flex: 1,
   },
   recountBox: {
     flexDirection: 'row',
