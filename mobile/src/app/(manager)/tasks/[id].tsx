@@ -158,7 +158,7 @@ export default function ManagerTaskDetailScreen() {
             <View style={styles.recountBox}>
               <Ionicons name="alert-circle" size={16} color={colors.warningText} />
               <Text style={styles.recountText}>
-                Recontagem ativa: "{task.manager_note}"
+                Recontagem ativa: &quot;{task.manager_note}&quot;
               </Text>
             </View>
           )}

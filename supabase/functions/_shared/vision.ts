@@ -280,6 +280,15 @@ export function parseCountResult(
   return result;
 }
 
+/** Início da resposta para o log; nunca lança (undefined, BigInt, objetos sem protótipo...). */
+function preview(payload: unknown): string {
+  try {
+    return String(JSON.stringify(payload) ?? typeof payload).slice(0, 2000);
+  } catch {
+    return `[${typeof payload} não serializável]`;
+  }
+}
+
 /** Valida e converte qualquer violação em ProviderError com mensagem acionável. */
 export function validateStage(
   stage: Stage,
@@ -297,7 +306,7 @@ export function validateStage(
     if (error instanceof SchemaError) {
       // Só no log do servidor: qual regra falhou e o início da resposta, para
       // ajustar prompt ou modelo sem expor detalhes ao app.
-      console.error(`[${stage}] resposta rejeitada: ${error.message}`, JSON.stringify(payload).slice(0, 2000));
+      console.error(`[${stage}] resposta rejeitada: ${error.message}`, preview(payload));
       throw new ProviderError(
         'A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.',
         { ...opts, cause: error },

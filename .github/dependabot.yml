@@ -1,0 +1,36 @@
+# Atualizações automáticas de dependências (PRs semanais).
+version: 2
+updates:
+  # Ações do GitHub usadas nos workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # App mobile. Pacotes do Expo/React Native só mudam junto com o SDK
+  # (pnpm expo install --fix), então ficam de fora; o resto vem agrupado.
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    ignore:
+      - dependency-name: 'expo'
+      - dependency-name: 'expo-*'
+      - dependency-name: '@expo/*'
+      - dependency-name: 'jest-expo'
+      - dependency-name: 'eslint-config-expo'
+      - dependency-name: 'react'
+      - dependency-name: 'react-dom'
+      - dependency-name: 'react-native'
+      - dependency-name: 'react-native-*'
+      - dependency-name: '@types/react'
+      - dependency-name: 'typescript'
+      - dependency-name: 'xlsx' # distribuído pelo CDN do SheetJS, não pelo npm
+    groups:
+      dependencias-menores:
+        update-types: [minor, patch]

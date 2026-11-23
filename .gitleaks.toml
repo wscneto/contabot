@@ -1,0 +1,8 @@
+# Varredura de segredos (gitleaks) — usada pelo workflow .github/workflows/security.yml.
+# Mantém as regras padrão e libera apenas valores fictícios conhecidos dos testes.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Senha fictícia usada pelos testes automatizados contra o Supabase local"
+regexes = ['''^senha-forte-123$''']

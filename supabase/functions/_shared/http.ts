@@ -16,6 +16,15 @@ export function fail(status: number, detail: string): Response {
   return json({ detail }, status);
 }
 
+/**
+ * Campo de texto do corpo, ou null se ausente ou de outro tipo. Evita confusão
+ * de tipos: String(["CODIGO"]) vira "CODIGO" e String({}) vira "[object Object]".
+ */
+export function stringField(body: Record<string, unknown>, key: string): string | null {
+  const value = body[key];
+  return typeof value === 'string' ? value : null;
+}
+
 export async function readJson(req: Request): Promise<Record<string, unknown>> {
   try {
     const body = await req.json();

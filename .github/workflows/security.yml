@@ -1,0 +1,62 @@
+name: Segurança
+
+# Análise estática de segurança (CodeQL) e varredura de segredos no histórico do
+# git (gitleaks). Roda em PRs, a cada push na main e toda segunda-feira, para
+# pegar vulnerabilidades novas em código que não mudou.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL · SAST (JavaScript/TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # publica os alertas na aba Security do repositório
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          # Consultas de segurança + qualidade (inclui injeção, XSS, path traversal, segredos no código...).
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:javascript-typescript'
+
+  gitleaks:
+    name: Gitleaks · segredos no histórico
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # histórico completo: um segredo apagado depois continua vazado
+
+      - name: Varre todos os commits
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0 \
+            git /repo --config /repo/.gitleaks.toml --redact --no-banner --verbose \
+            --report-format sarif --report-path /repo/gitleaks.sarif
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          retention-days: 14

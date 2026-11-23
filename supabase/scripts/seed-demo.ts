@@ -40,8 +40,11 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function check<T>(result: { data: T; error: unknown }, what: string): T {
+/** Devolve `data` ou interrompe o seed com o erro do Supabase (ou se vier vazio). */
+// deno-lint-ignore no-explicit-any
+function check(result: { data: any; error: unknown }, what: string): any {
   if (result.error) throw new Error(`${what}: ${JSON.stringify(result.error)}`);
+  if (result.data == null) throw new Error(`${what}: resposta vazia`);
   return result.data;
 }
 

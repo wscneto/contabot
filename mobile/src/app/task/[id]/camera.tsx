@@ -110,6 +110,8 @@ function CameraRecorderContent() {
         // No Android/iOS, copia imediatamente para o documentDirectory do app para que
         // o desmonte do CameraView ou a limpeza de cache do SO não apague o arquivo.
         if (Platform.OS !== 'web' && FileSystem.documentDirectory) {
+          // Roda no handler de gravação (não no render): falso positivo da regra de pureza.
+          // eslint-disable-next-line react-hooks/purity
           const safeName = `capture_${id}_${Date.now()}.mp4`;
           const dest = `${FileSystem.documentDirectory}${safeName}`;
           try {
