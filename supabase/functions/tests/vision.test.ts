@@ -98,8 +98,67 @@ Deno.test('identificação exige todos os SKUs, motivo e evidência para present
   assertThrows(() => parseIdentification(noEvidence, 'video-1', ['sku-a'], ['frame-1']), Error, 'evidência');
 });
 
-Deno.test('validateStage converte violações em ProviderError', () => {
-  assertThrows(() => validateStage('count', {}, 'v', ['s'], ['f']), ProviderError, 'viola o esquema');
+Deno.test('validateStage converte violações em ProviderError e preserva a causa interna', () => {
+  const err = assertThrows(() => validateStage('count', {}, 'v', ['s'], ['f']), ProviderError, 'viola o esquema');
+  assert(err.cause instanceof Error);
+  assert(err.cause.message.includes('CountResult'));
+});
+
+Deno.test('chat instrui a não ecoar o JSON Schema e faz 1 retry corretivo quando o modelo devolve o próprio schema', async () => {
+  const captured: Json[] = [];
+  const echoedSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: { video_id: { type: 'string' } },
+    required: ['video_id', 'matches', 'unknown_products'],
+  };
+  const validAnswer = {
+    video_id: 'video-1',
+    matches: [{ sku_id: 'sku-a', status: 'present', reason: 'Visível.', evidence_frame_ids: ['frame-2'] }],
+    unknown_products: [],
+  };
+  const responses = [echoedSchema, validAnswer];
+  const seqFetch = ((_url: string, req: RequestInit) => {
+    captured.push(JSON.parse(String(req.body)));
+    const next = responses.shift() ?? echoedSchema;
+    const body = {
+      id: `req-${captured.length}`,
+      model: 'modelo-x',
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(next) } }],
+    };
+    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  }) as typeof fetch;
+
+  const result = await chat(seqFetch).identify(video, catalog, frames);
+  assertEquals(result.prediction.matches[0].status, 'present');
+  assertEquals(captured.length, 2);
+  // O system prompt deve conter exemplo concreto e proibição de devolver as chaves do JSON Schema
+  assert(captured[0].messages[0].content.includes('NUNCA retorne a definição do esquema'));
+  // A 2ª tentativa deve incluir a resposta incorreta e o erro específico de validação para autocorreção
+  assertEquals(captured[1].messages.length, 4);
+  assertEquals(captured[1].messages[2].role, 'assistant');
+  assertEquals(captured[1].messages[3].role, 'user');
+  assert(captured[1].messages[3].content.includes('campos inesperados'));
+
+  // Se continuar inválido na 2ª tentativa, falha fechado após o único retry (2 chamadas no total)
+  const alwaysBadCalls: Json[] = [];
+  const alwaysBadFetch = ((_url: string, req: RequestInit) => {
+    alwaysBadCalls.push(JSON.parse(String(req.body)));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          id: 'req-bad',
+          model: 'modelo-x',
+          usage: {},
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(echoedSchema) } }],
+        }),
+        { status: 200 },
+      ),
+    );
+  }) as typeof fetch;
+  await assertRejects(() => chat(alwaysBadFetch).identify(video, catalog, frames), ProviderError, 'viola o esquema');
+  assertEquals(alwaysBadCalls.length, 2);
 });
 
 // ---------------------------------------------------------------------------
@@ -257,7 +316,7 @@ Deno.test('quadros de contagem somam identificação e vizinhos das evidências'
   assertThrows(() => countingFrames(pool, ident, skus, identification, 2, 4), ProviderError, 'Produtos demais');
 });
 
-Deno.test('itens: ok chega preenchido, dúvida e ausência ficam para conferência', () => {
+Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fica sem quantidade', () => {
   const frames = [stored('f0001', 0, 1)];
   const skus = ['a', 'b', 'c', 'd'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
   const identification = {
@@ -277,8 +336,56 @@ Deno.test('itens: ok chega preenchido, dúvida e ausência ficam para conferênc
     ],
   };
   const items = countItems(skus, identification, result, frames);
-  assertEquals(items.map((i) => [i.ai_status, i.counted]), [['ok', 5], ['check', null], ['missing', null], ['missing', null]]);
+  assertEquals(items.map((i) => [i.ai_status, i.counted]), [['ok', 5], ['check', 2], ['missing', null], ['missing', null]]);
   assertEquals(items[0].evidence_frame, 'loja/captures/cap/f0001.jpg');
   assertEquals(items[3].ai_note, 'motivo d');
   assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing'), true);
+});
+
+Deno.test('notas longas da IA não são cortadas em 300 caracteres em countItems nem noMatchItems', () => {
+  const frames = [stored('f0001', 0, 1)];
+  const skus = ['a', 'b'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
+  const longCountReason =
+    'Contagem visível parcial no frame f0001: quatro unidades físicas identificadas com nitidez na prateleira superior, ' +
+    'incluindo marca, variante e peso de 500 g compatíveis com a foto de referência enviada no catálogo oficial da loja. ' +
+    'No entanto, há várias caixas parcialmente encobertas atrás da fileira frontal e a varredura curta não mostra a lateral direita completa, ' +
+    'impedindo afirmar o total do estoque sem conferência manual cuidadosa.';
+  const longMissReason =
+    'Os produtos observados nos quadros enviados pertencem a outra marca e outra embalagem (sachês azuis e brancos de açúcar 5 g), ' +
+    'não correspondendo ao item cadastrado na referência com frasco vermelho e tampa preta de 500 ml, embora compartilhem a mesma gôndola ' +
+    'próxima ao balcão principal durante toda a gravação contínua que foi enviada e analisada pela inteligência artificial.';
+  assert(longCountReason.length > 350);
+  assert(longMissReason.length > 350);
+
+  const identification = {
+    video_id: 'cap',
+    matches: [
+      { sku_id: 'a', status: 'present' as const, reason: 'ok', evidence_frame_ids: ['f0001'] },
+      { sku_id: 'b', status: 'absent' as const, reason: longMissReason, evidence_frame_ids: [] },
+    ],
+    unknown_products: [],
+  };
+  const result = {
+    video_id: 'cap',
+    coverage_complete: false,
+    overlap_resolved: true,
+    unknown_products: [],
+    counts: [
+      {
+        sku_id: 'a',
+        quantity: 4,
+        incomplete: true,
+        needs_review: true,
+        reason: longCountReason,
+        evidence_frame_ids: ['f0001'],
+      },
+    ],
+  };
+
+  const counted = countItems(skus, identification, result, frames);
+  assertEquals(counted[0].ai_note, longCountReason);
+  assertEquals(counted[1].ai_note, longMissReason);
+
+  const missed = noMatchItems([skus[1]], [identification.matches[1]]);
+  assertEquals(missed[0].ai_note, longMissReason);
 });

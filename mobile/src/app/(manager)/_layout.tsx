@@ -1,73 +1,23 @@
 import React from 'react';
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Stack } from 'expo-router';
 import { colors } from '../../constants/theme';
 
 export default function ManagerLayout() {
   return (
-    <Tabs
+    <Stack
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.surfaceBorder,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Início',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid-outline" size={size} color={color as string} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="tasks"
-        options={{
-          title: 'Contagens',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="clipboard-outline" size={size} color={color as string} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="products"
-        options={{
-          title: 'Produtos',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube-outline" size={size} color={color as string} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="areas"
-        options={{
-          title: 'Áreas',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map-outline" size={size} color={color as string} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="team"
-        options={{
-          title: 'Equipe',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people-outline" size={size} color={color as string} />
-          ),
-        }}
-      />
-    </Tabs>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="products/new" options={{ headerShown: false }} />
+      <Stack.Screen name="products/import" options={{ headerShown: false }} />
+      <Stack.Screen name="products/batch-photos" options={{ headerShown: false }} />
+      <Stack.Screen name="products/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="areas/new" options={{ headerShown: false }} />
+      <Stack.Screen name="tasks/new" options={{ headerShown: false }} />
+      <Stack.Screen name="tasks/[id]" options={{ headerShown: false }} />
+    </Stack>
   );
 }

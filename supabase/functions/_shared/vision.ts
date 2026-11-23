@@ -8,8 +8,11 @@ export type Stage = 'identify' | 'count';
 export class ProviderError extends Error {
   usage: Record<string, unknown>;
   requestId: string | null;
-  constructor(message: string, opts: { usage?: Record<string, unknown>; requestId?: string | null } = {}) {
-    super(message);
+  constructor(
+    message: string,
+    opts: { usage?: Record<string, unknown>; requestId?: string | null; cause?: unknown } = {},
+  ) {
+    super(message, opts.cause !== undefined ? { cause: opts.cause } : undefined);
     this.name = 'ProviderError';
     this.usage = opts.usage ?? {};
     this.requestId = opts.requestId ?? null;
@@ -297,7 +300,7 @@ export function validateStage(
       console.error(`[${stage}] resposta rejeitada: ${error.message}`, JSON.stringify(payload).slice(0, 2000));
       throw new ProviderError(
         'A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.',
-        opts,
+        { ...opts, cause: error },
       );
     }
     throw error;

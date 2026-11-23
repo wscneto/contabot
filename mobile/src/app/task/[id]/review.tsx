@@ -16,6 +16,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { api } from '../../../services/api';
+import { initialReviewCounts } from '../../../services/capture';
 import { useAuth } from '../../../context/AuthContext';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
@@ -49,17 +50,7 @@ export default function ReviewScreen() {
   // Initialize counts from task items
   useEffect(() => {
     if (task && task.items) {
-      const initialCounts: Record<string, number | null> = {};
-      for (const item of task.items) {
-        if (item.counted !== null && item.counted !== undefined) {
-          initialCounts[item.product_id] = item.counted;
-        } else if (item.ai_status === 'ok' && item.ai_quantity !== null) {
-          initialCounts[item.product_id] = item.ai_quantity;
-        } else {
-          initialCounts[item.product_id] = null;
-        }
-      }
-      setCounts(initialCounts);
+      setCounts(initialReviewCounts(task.items));
     }
   }, [task]);
 
@@ -201,6 +192,7 @@ export default function ReviewScreen() {
             <Ionicons
               name={item.ai_status === 'check' ? 'warning-outline' : 'information-circle-outline'}
               size={15}
+              style={styles.aiNoteIcon}
               color={
                 item.ai_status === 'check'
                   ? colors.warningText
@@ -215,7 +207,6 @@ export default function ReviewScreen() {
                 item.ai_status === 'check' && { color: colors.warningText },
                 item.ai_status === 'missing' && { color: colors.dangerText },
               ]}
-              numberOfLines={2}
             >
               {item.ai_note}
             </Text>
@@ -464,12 +455,15 @@ const styles = StyleSheet.create({
   },
   aiNoteBox: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
     marginBottom: 10,
+  },
+  aiNoteIcon: {
+    marginTop: 2,
   },
   aiNoteWarning: {
     backgroundColor: colors.warningBg,
@@ -479,6 +473,7 @@ const styles = StyleSheet.create({
   },
   aiNoteText: {
     fontSize: 12,
+    lineHeight: 17,
     color: colors.textSecondary,
     marginLeft: 6,
     flex: 1,
