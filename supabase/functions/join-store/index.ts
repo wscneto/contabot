@@ -6,7 +6,7 @@
  * Nenhum e-mail é enviado.
  */
 import { hashAccessCode, normalizeAccessCode } from '../_shared/access-code.ts';
-import { corsHeaders, fail, json, readJson } from '../_shared/http.ts';
+import { corsHeaders, fail, json, readJson, stringField } from '../_shared/http.ts';
 import { adminClient } from '../_shared/supabase.ts';
 
 Deno.serve(async (req) => {
@@ -14,7 +14,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return fail(405, 'Use POST.');
 
   const body = await readJson(req);
-  const code = normalizeAccessCode(String(body.code ?? ''));
+  const rawCode = stringField(body, 'code');
+  if (rawCode === null || rawCode.length > 64) return fail(401, 'Código de acesso inválido. Deve ter 8 caracteres.');
+  const code = normalizeAccessCode(rawCode);
   if (code.length !== 8) return fail(401, 'Código de acesso inválido. Deve ter 8 caracteres.');
 
   const admin = adminClient();

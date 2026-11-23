@@ -4,7 +4,7 @@
  * única vez; o banco guarda só o hash.
  */
 import { generateAccessCode, hashAccessCode } from '../_shared/access-code.ts';
-import { corsHeaders, fail, json, readJson } from '../_shared/http.ts';
+import { corsHeaders, fail, json, readJson, stringField } from '../_shared/http.ts';
 import { adminClient, requireCaller } from '../_shared/supabase.ts';
 
 Deno.serve(async (req) => {
@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
   if (caller.user.role !== 'manager') return fail(403, 'Acesso restrito ao gerente da loja.');
 
   const body = await readJson(req);
-  const name = String(body.name ?? '').trim();
+  const name = (stringField(body, 'name') ?? '').trim();
   if (name.length < 1 || name.length > 100) return fail(422, 'Informe o nome do funcionário (até 100 caracteres).');
 
   const admin = adminClient();
