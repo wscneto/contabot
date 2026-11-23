@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -25,6 +25,12 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { colors, typography } from '../../../constants/theme';
 import { confirmAction, showMessage } from '../../../utils/confirm';
+import {
+  countAttentionItems,
+  filterReviewItems,
+  type ReviewFilter,
+  sortReviewItems,
+} from '../../../utils/review-items';
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -38,10 +44,11 @@ export default function ReviewScreen() {
 
   // Local state for counts by product_id
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [filter, setFilter] = useState<ReviewFilter>('all');
   const [submitting, setSubmitting] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; title: string } | null>(null);
 
-  const { data: task, isLoading, refetch } = useQuery({
+  const { data: task, isLoading } = useQuery({
     queryKey: ['task_detail', id],
     queryFn: () => api.getTask(id),
     enabled: Boolean(id),
@@ -53,6 +60,22 @@ export default function ReviewScreen() {
       setCounts(initialReviewCounts(task.items));
     }
   }, [task]);
+
+  const taskItems = task?.items;
+  const sortedItems = useMemo(
+    () => (taskItems ? sortReviewItems(taskItems) : []),
+    [taskItems],
+  );
+
+  const visibleItems = useMemo(
+    () => filterReviewItems(sortedItems, filter, counts),
+    [sortedItems, filter, counts],
+  );
+
+  const attentionCount = useMemo(
+    () => countAttentionItems(sortedItems, counts),
+    [sortedItems, counts],
+  );
 
   if (isLoading || !task) {
     return (
@@ -268,7 +291,7 @@ export default function ReviewScreen() {
       )}
 
       <FlatList
-        data={task.items}
+        data={visibleItems}
         keyExtractor={(item) => item.product_id}
         renderItem={renderProductRow}
         contentContainerStyle={[styles.listContent, { paddingBottom: 140 + insets.bottom }]}
@@ -276,9 +299,67 @@ export default function ReviewScreen() {
           <View style={styles.listHeader}>
             <Text style={styles.guideTitle}>Conferência na Prateleira</Text>
             <Text style={styles.guideSubtitle}>
-              Os valores marcados em verde foram identificados com clareza. Dê atenção especial aos itens com aviso amarelo ou vermelho.
+              Itens que precisam de atenção aparecem primeiro. Dê atenção especial aos avisos amarelos e vermelhos.
             </Text>
+
+            <View style={styles.filterRow}>
+              <TouchableOpacity
+                style={[styles.filterChip, filter === 'all' && styles.filterChipActive]}
+                onPress={() => setFilter('all')}
+              >
+                <Text style={[styles.filterChipText, filter === 'all' && styles.filterChipTextActive]}>
+                  Todos ({totalCount})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  filter === 'attention' && styles.filterChipAttentionActive,
+                  attentionCount > 0 && filter !== 'attention' && styles.filterChipAttentionHint,
+                ]}
+                onPress={() => setFilter('attention')}
+              >
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={14}
+                  color={
+                    filter === 'attention'
+                      ? '#FFF'
+                      : attentionCount > 0
+                      ? colors.warningText
+                      : colors.textSecondary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    filter === 'attention' && styles.filterChipTextActive,
+                    attentionCount > 0 && filter !== 'attention' && { color: colors.warningText },
+                  ]}
+                >
+                  Pendentes de revisão ({attentionCount})
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
+        }
+        ListEmptyComponent={
+          filter === 'attention' ? (
+            <View style={styles.emptyFilterBox}>
+              <Ionicons name="checkmark-done-circle-outline" size={44} color={colors.success} />
+              <Text style={styles.emptyFilterTitle}>Nenhum item pendente de revisão</Text>
+              <Text style={styles.emptyFilterSubtitle}>
+                Todos os produtos foram identificados com clareza pela IA e já têm quantidade preenchida.
+              </Text>
+              <Button
+                title="Ver todos os itens"
+                variant="outline"
+                size="sm"
+                onPress={() => setFilter('all')}
+              />
+            </View>
+          ) : undefined
         }
       />
 
@@ -386,6 +467,60 @@ const styles = StyleSheet.create({
   guideSubtitle: {
     ...typography.caption,
     marginTop: 4,
+    lineHeight: 18,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  filterChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  filterChipAttentionHint: {
+    backgroundColor: colors.warningBg,
+    borderColor: '#FDE68A',
+  },
+  filterChipAttentionActive: {
+    backgroundColor: colors.warning,
+    borderColor: colors.warning,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  filterChipTextActive: {
+    color: '#FFF',
+  },
+  emptyFilterBox: {
+    alignItems: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  emptyFilterTitle: {
+    ...typography.h3,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  emptyFilterSubtitle: {
+    ...typography.caption,
+    textAlign: 'center',
+    marginBottom: 8,
     lineHeight: 18,
   },
   productCard: {

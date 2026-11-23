@@ -1,5 +1,17 @@
-import { render, screen, userEvent } from '@testing-library/react-native';
+import { act, render, screen, userEvent } from '@testing-library/react-native';
 import LoginScreen from '@/app/(auth)/login';
+
+let capturedOnBarcodeScanned: ((result: { data: string; type: string }) => void) | undefined;
+jest.mock('expo-camera', () => {
+  const { View: MockView } = jest.requireActual<typeof import('react-native')>('react-native');
+  return {
+    useCameraPermissions: () => [{ granted: true }, jest.fn(() => Promise.resolve({ granted: true }))],
+    CameraView: ({ onBarcodeScanned }: any) => {
+      capturedOnBarcodeScanned = onBarcodeScanned;
+      return <MockView testID="mock-qr-camera" />;
+    },
+  };
+});
 
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
@@ -140,6 +152,23 @@ describe('LoginScreen', () => {
 
       await user.press(screen.getByText('Gerente'));
       expect(screen.queryByText('Informe o código de acesso recebido do gerente.')).not.toBeOnTheScreen();
+    });
+
+    test('escanear QR Code preenche o código e faz login automaticamente', async () => {
+      capturedOnBarcodeScanned = undefined;
+      mockLoginEmployee.mockResolvedValueOnce(undefined);
+      const user = userEvent.setup();
+      await render(<LoginScreen />);
+
+      await user.press(screen.getByRole('button', { name: 'Escanear QR Code' }));
+      expect(screen.getByTestId('mock-qr-camera')).toBeOnTheScreen();
+
+      await act(async () => {
+        capturedOnBarcodeScanned?.({ data: JSON.stringify({ code: 'ANA1-2345' }), type: 'qr' });
+      });
+
+      expect(mockLoginEmployee).toHaveBeenCalledWith('ANA1-2345');
+      expect(mockReplace).toHaveBeenCalledWith('/(employee)');
     });
   });
 });

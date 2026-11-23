@@ -28,17 +28,27 @@ export default function ManagerAreasScreen() {
   const renderItem = ({ item }: { item: any }) => {
     return (
       <Card style={styles.card}>
-        <View style={styles.cardTop}>
+        <TouchableOpacity
+          style={styles.cardTop}
+          onPress={() => router.push(`/(manager)/areas/${item.id}`)}
+          activeOpacity={0.75}
+          accessibilityLabel={`Editar área ${item.name}`}
+        >
           <View style={{ flex: 1, marginRight: 10 }}>
             <Text style={styles.areaName}>{item.name}</Text>
             {item.description ? (
               <Text style={styles.areaDesc}>{item.description}</Text>
             ) : null}
           </View>
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{item.product_count} produtos</Text>
+          <View style={styles.topRightRow}>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>
+                {item.product_count} {item.product_count === 1 ? 'produto' : 'produtos'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </View>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.cardBottom}>
           <Text style={styles.lastCountedText}>
@@ -47,16 +57,24 @@ export default function ManagerAreasScreen() {
               : 'Nunca contada'}
           </Text>
 
-          <Button
-            title="Mandar Contar"
-            size="sm"
-            onPress={() =>
-              router.push({
-                pathname: '/(manager)/tasks/new',
-                params: { preselectAreaId: item.id },
-              })
-            }
-          />
+          <View style={styles.cardActions}>
+            <Button
+              title="Editar"
+              variant="outline"
+              size="sm"
+              onPress={() => router.push(`/(manager)/areas/${item.id}`)}
+            />
+            <Button
+              title="Mandar Contar"
+              size="sm"
+              onPress={() =>
+                router.push({
+                  pathname: '/(manager)/tasks/new',
+                  params: { preselectAreaId: item.id },
+                })
+              }
+            />
+          </View>
         </View>
       </Card>
     );
@@ -143,6 +161,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
   },
+  topRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   countBadgeText: {
     fontSize: 12,
     fontWeight: '600',
@@ -152,13 +175,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceBorder,
     paddingTop: 12,
   },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   lastCountedText: {
     fontSize: 12,
     color: colors.textMuted,
+    flex: 1,
   },
   emptyContainer: {
     alignItems: 'center',

@@ -16,6 +16,7 @@ import { isSupabaseConfigured } from '../../lib/supabase';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { Card } from '../../components/Card';
+import { QRCodeScannerModal } from '../../components/QRCodeScannerModal';
 import { colors, typography } from '../../constants/theme';
 
 export default function LoginScreen() {
@@ -33,22 +34,33 @@ export default function LoginScreen() {
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
 
-  const handleEmployeeLogin = async () => {
-    if (!accessCode.trim()) {
+  const submitEmployeeCode = async (rawCode: string) => {
+    const trimmed = rawCode.trim();
+    if (!trimmed) {
       setErrorMsg('Informe o código de acesso recebido do gerente.');
       return;
     }
     setLoading(true);
     setErrorMsg('');
     try {
-      await loginEmployee(accessCode.trim());
+      await loginEmployee(trimmed);
       router.replace('/(employee)');
     } catch (err: any) {
       setErrorMsg(err.message || 'Código de acesso incorreto.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEmployeeLogin = () => submitEmployeeCode(accessCode);
+
+  const handleQrCodeScanned = (code: string) => {
+    setScannerOpen(false);
+    setAccessCode(code);
+    setErrorMsg('');
+    void submitEmployeeCode(code);
   };
 
   const handleManagerLogin = async () => {
@@ -162,7 +174,7 @@ export default function LoginScreen() {
               <View>
                 <Text style={styles.sectionTitle}>Entrar com Código</Text>
                 <Text style={styles.sectionSubtitle}>
-                  Digite o código de 8 dígitos gerado pelo gerente da sua loja.
+                  Escaneie o QR Code ou digite o código de 8 dígitos gerado pelo gerente da sua loja.
                 </Text>
 
                 <Input
@@ -188,6 +200,21 @@ export default function LoginScreen() {
                   size="lg"
                   style={styles.submitBtn}
                 />
+
+                {Platform.OS !== 'web' && (
+                  <Button
+                    title="Escanear QR Code"
+                    onPress={() => {
+                      setErrorMsg('');
+                      setScannerOpen(true);
+                    }}
+                    disabled={loading}
+                    variant="outline"
+                    size="md"
+                    icon={<Ionicons name="qr-code-outline" size={18} color={colors.primary} />}
+                    style={styles.qrScanBtn}
+                  />
+                )}
 
                 {/* Quick Demo Helper */}
                 <TouchableOpacity
@@ -271,6 +298,12 @@ export default function LoginScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <QRCodeScannerModal
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onCodeScanned={handleQrCodeScanned}
+      />
     </SafeAreaView>
   );
 }
@@ -368,6 +401,9 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: 8,
+  },
+  qrScanBtn: {
+    marginTop: 10,
   },
   demoPill: {
     flexDirection: 'row',

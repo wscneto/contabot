@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -17,15 +17,27 @@ import { api } from '../../../services/api';
 import { Card } from '../../../components/Card';
 import { Badge } from '../../../components/Badge';
 import { Button } from '../../../components/Button';
+import { OnboardingChecklistCard } from '../../../components/OnboardingChecklistCard';
 import { colors, typography } from '../../../constants/theme';
 
 export default function ManagerDashboardScreen() {
   const router = useRouter();
   const { user, store } = useAuth();
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
   const { data: dash, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['manager_dashboard'],
     queryFn: () => api.getDashboard(),
+  });
+
+  const { data: products, refetch: refetchProducts } = useQuery({
+    queryKey: ['manager_products'],
+    queryFn: () => api.listProducts(),
+  });
+
+  const { data: areas, refetch: refetchAreas } = useQuery({
+    queryKey: ['manager_areas'],
+    queryFn: () => api.listAreas(),
   });
 
   if (isLoading && !dash) {
@@ -42,6 +54,14 @@ export default function ManagerDashboardScreen() {
   const toApproveList = dash?.to_approve || [];
   const lowStockList = dash?.low_stock || [];
   const staleAreasList = dash?.stale_areas || [];
+  const recentList = dash?.recent || [];
+
+  const catalogLoaded = Array.isArray(products) && Array.isArray(areas);
+  const hasProducts = (products?.length ?? 0) > 0;
+  const hasProductPhotos = Boolean(products?.some((p: any) => Array.isArray(p.photos) && p.photos.length > 0));
+  const hasAreas = (areas?.length ?? 0) > 0;
+  const hasAnyTask =
+    counts.to_approve + counts.in_progress + counts.open + recentList.length > 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -69,17 +89,39 @@ export default function ManagerDashboardScreen() {
           <RefreshControl
             refreshing={isRefetching}
             onRefresh={() => {
-              void refetch();
+              void Promise.all([refetch(), refetchProducts(), refetchAreas()]);
             }}
             colors={[colors.primary]}
           />
         }
       >
+        {catalogLoaded && !onboardingDismissed && (
+          <OnboardingChecklistCard
+            hasProducts={hasProducts}
+            hasProductPhotos={hasProductPhotos}
+            hasAreas={hasAreas}
+            hasAnyTask={hasAnyTask}
+            onProductsPress={() =>
+              router.push(
+                hasProducts && !hasProductPhotos
+                  ? '/(manager)/products/batch-photos'
+                  : '/(manager)/products/new',
+              )
+            }
+            onAreasPress={() => router.push('/(manager)/areas/new')}
+            onStartCountPress={() => router.push('/(manager)/tasks/new')}
+            onInviteTeamPress={() => router.push('/(manager)/team')}
+            onDismiss={() => setOnboardingDismissed(true)}
+          />
+        )}
+
         {/* KPI Cards Grid */}
         <View style={styles.kpiGrid}>
           <TouchableOpacity
             style={[styles.kpiCard, counts.to_approve > 0 && styles.kpiCardPurple]}
-            onPress={() => router.push('/(manager)/tasks')}
+            onPress={() =>
+              router.push({ pathname: '/(manager)/tasks', params: { initialFilter: 'submitted' } })
+            }
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiNumber}>{counts.to_approve}</Text>
@@ -94,7 +136,9 @@ export default function ManagerDashboardScreen() {
 
           <TouchableOpacity
             style={styles.kpiCard}
-            onPress={() => router.push('/(manager)/tasks')}
+            onPress={() =>
+              router.push({ pathname: '/(manager)/tasks', params: { initialFilter: 'open' } })
+            }
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiNumber}>{counts.in_progress}</Text>
@@ -105,7 +149,9 @@ export default function ManagerDashboardScreen() {
 
           <TouchableOpacity
             style={styles.kpiCard}
-            onPress={() => router.push('/(manager)/tasks')}
+            onPress={() =>
+              router.push({ pathname: '/(manager)/tasks', params: { initialFilter: 'open' } })
+            }
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiNumber}>{counts.open}</Text>
@@ -116,7 +162,9 @@ export default function ManagerDashboardScreen() {
 
           <TouchableOpacity
             style={[styles.kpiCard, counts.overdue > 0 && styles.kpiCardDanger]}
-            onPress={() => router.push('/(manager)/tasks')}
+            onPress={() =>
+              router.push({ pathname: '/(manager)/tasks', params: { initialFilter: 'open' } })
+            }
           >
             <View style={styles.kpiHeader}>
               <Text style={[styles.kpiNumber, counts.overdue > 0 && { color: colors.dangerText }]}>

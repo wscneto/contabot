@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -17,13 +16,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
 import { exportApprovedTaskCsv } from '../../../utils/exportCsv';
-import { showMessage } from '../../../utils/confirm';
+import { confirmAction, showMessage } from '../../../utils/confirm';
+import { formatIsoDateToBR } from '../../../utils/date';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
 import { Card } from '../../../components/Card';
 import { Button } from '../../../components/Button';
 import { ExportCsvButton } from '../../../components/ExportCsvButton';
 import { Input } from '../../../components/Input';
+import { Stepper } from '../../../components/Stepper';
 import { colors, typography } from '../../../constants/theme';
 
 export default function ManagerTaskDetailScreen() {
@@ -38,8 +39,9 @@ export default function ManagerTaskDetailScreen() {
   const [recountModal, setRecountModal] = useState(false);
   const [recountNote, setRecountNote] = useState('');
   const [selectedFrame, setSelectedFrame] = useState<{ url: string; title: string } | null>(null);
+  const [countOverrides, setCountOverrides] = useState<Record<string, number | null>>({});
 
-  const { data: task, isLoading, refetch } = useQuery({
+  const { data: task, isLoading } = useQuery({
     queryKey: ['manager_task_detail', id],
     queryFn: () => api.getTask(id),
     enabled: Boolean(id),
@@ -60,6 +62,23 @@ export default function ManagerTaskDetailScreen() {
   const isSubmitted = task.status === 'submitted';
   const isApproved = task.status === 'approved';
   const canCount = ['open', 'analyzing', 'review'].includes(task.status);
+  const adjustedCount = Object.keys(countOverrides).length;
+
+  const handleOverrideChange = (
+    productId: string,
+    originalCount: number | null,
+    nextVal: number | null,
+  ) => {
+    setCountOverrides((prev) => {
+      const next = { ...prev };
+      if (nextVal === originalCount) {
+        delete next[productId];
+      } else {
+        next[productId] = nextVal;
+      }
+      return next;
+    });
+  };
 
   const handleExportCsv = async () => {
     if (!isManager || !isApproved || exporting) return;
@@ -73,36 +92,38 @@ export default function ManagerTaskDetailScreen() {
     }
   };
 
-  const handleApprove = async () => {
-    Alert.alert(
+  const handleApprove = () => {
+    const message =
+      adjustedCount > 0
+        ? `Você ajustou ${adjustedCount} ${adjustedCount === 1 ? 'item' : 'itens'}. Ao aprovar, as quantidades finais serão gravadas no estoque oficial da loja.`
+        : 'Ao aprovar, as quantidades conferidas serão gravadas no estoque oficial da loja.';
+
+    confirmAction(
       'Aprovar Contagem',
-      'Ao aprovar, as quantidades conferidas serão gravadas no estoque oficial da loja.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Aprovar e Gravar',
-          onPress: async () => {
-            setApproving(true);
-            try {
-              await api.approveTask(id);
-              queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
-              queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
-              queryClient.invalidateQueries({ queryKey: ['manager_task_detail', id] });
-              Alert.alert('Sucesso', 'Contagem aprovada e estoque atualizado!');
-            } catch (err: any) {
-              Alert.alert('Erro ao aprovar', err.message || 'Falha na aprovação.');
-            } finally {
-              setApproving(false);
-            }
-          },
-        },
-      ]
+      message,
+      async () => {
+        setApproving(true);
+        try {
+          await api.approveTask(id, adjustedCount > 0 ? countOverrides : undefined);
+          setCountOverrides({});
+          void queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
+          void queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
+          void queryClient.invalidateQueries({ queryKey: ['manager_products'] });
+          void queryClient.invalidateQueries({ queryKey: ['manager_task_detail', id] });
+          showMessage('Sucesso', 'Contagem aprovada e estoque atualizado!');
+        } catch (err: any) {
+          showMessage('Erro ao aprovar', err.message || 'Falha na aprovação.');
+        } finally {
+          setApproving(false);
+        }
+      },
+      { confirmText: 'Aprovar e Gravar' },
     );
   };
 
   const handleRecount = async () => {
     if (!recountNote.trim()) {
-      Alert.alert('Atenção', 'Informe o motivo da recontagem para orientar o funcionário.');
+      showMessage('Atenção', 'Informe o motivo da recontagem para orientar o funcionário.');
       return;
     }
     setRecounting(true);
@@ -110,35 +131,37 @@ export default function ManagerTaskDetailScreen() {
       await api.requestRecount(id, recountNote.trim());
       setRecountModal(false);
       setRecountNote('');
-      queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['manager_task_detail', id] });
-      Alert.alert('Recontagem solicitada', 'A contagem retornou para a lista do funcionário com suas instruções.');
+      setCountOverrides({});
+      void queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['manager_task_detail', id] });
+      showMessage(
+        'Recontagem solicitada',
+        'A contagem retornou para a lista do funcionário com suas instruções.',
+      );
     } catch (err: any) {
-      Alert.alert('Erro', err.message || 'Falha ao solicitar recontagem.');
+      showMessage('Erro', err.message || 'Falha ao solicitar recontagem.');
     } finally {
       setRecounting(false);
     }
   };
 
   const handleDelete = () => {
-    Alert.alert('Excluir Contagem', 'Deseja excluir esta contagem agendada?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Excluir',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.deleteTask(id);
-            queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
-            router.back();
-          } catch (err: any) {
-            Alert.alert('Erro ao excluir', err.message || 'Falha ao excluir contagem.');
-          }
-        },
+    confirmAction(
+      'Excluir Contagem',
+      'Deseja excluir esta contagem agendada?',
+      async () => {
+        try {
+          await api.deleteTask(id);
+          void queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
+          void queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
+          router.back();
+        } catch (err: any) {
+          showMessage('Erro ao excluir', err.message || 'Falha ao excluir contagem.');
+        }
       },
-    ]);
+      { confirmText: 'Excluir', destructive: true },
+    );
   };
 
   return (
@@ -186,7 +209,7 @@ export default function ManagerTaskDetailScreen() {
             <View style={styles.summaryFooter}>
               {task.due_date ? (
                 <Text style={styles.dueDateText}>
-                  Prazo limite: {task.due_date} {task.overdue ? '(Atrasada)' : ''}
+                  Prazo limite: {formatIsoDateToBR(task.due_date)} {task.overdue ? '(Atrasada)' : ''}
                 </Text>
               ) : (
                 <View />
@@ -223,20 +246,42 @@ export default function ManagerTaskDetailScreen() {
         {/* Comparison Table Header */}
         <View style={styles.tableHeaderRow}>
           <Text style={styles.tableTitle}>Comparação dos Itens ({task.items?.length || 0})</Text>
+          {isSubmitted && adjustedCount > 0 && (
+            <TouchableOpacity onPress={() => setCountOverrides({})}>
+              <Text style={styles.resetOverridesLink}>Desfazer ajustes ({adjustedCount})</Text>
+            </TouchableOpacity>
+          )}
         </View>
+
+        {isSubmitted && (
+          <View style={styles.editTipBox}>
+            <Ionicons name="create-outline" size={16} color={colors.primaryDark} />
+            <Text style={styles.editTipText}>
+              Você pode ajustar a quantidade final de qualquer item abaixo antes de aprovar, sem precisar pedir recontagem.
+            </Text>
+          </View>
+        )}
 
         {/* Product Items */}
         {task.items?.map((item: any) => {
           const photoUrl = api.resolveMediaUrl(item.photo);
           const evidenceUrl = api.resolveMediaUrl(item.evidence_frame);
           const prev = item.previous;
-          const counted = isApproved ? item.final : item.counted;
+          const hasOverride = Object.prototype.hasOwnProperty.call(countOverrides, item.product_id);
+          const finalValue = isApproved
+            ? item.final
+            : isSubmitted && hasOverride
+            ? countOverrides[item.product_id]
+            : item.counted;
           const aiQty = item.ai_quantity;
+          const isAdjusted = isSubmitted && hasOverride;
+          const wasAdjustedOnApproval =
+            isApproved && item.counted !== null && item.final !== null && item.final !== item.counted;
 
-          const diffWithPrev = prev !== null && counted !== null ? counted - prev : null;
+          const diffWithPrev = prev !== null && finalValue !== null ? finalValue - prev : null;
 
           return (
-            <Card key={item.product_id} style={styles.itemCard}>
+            <Card key={item.product_id} style={[styles.itemCard, isAdjusted && styles.itemCardAdjusted]}>
               <View style={styles.itemTopRow}>
                 {photoUrl ? (
                   <Image source={{ uri: photoUrl }} style={styles.itemThumb} contentFit="cover" />
@@ -250,6 +295,11 @@ export default function ManagerTaskDetailScreen() {
                   {item.variant ? <Text style={styles.itemVariant}>{item.variant}</Text> : null}
                   <View style={styles.badgeLine}>
                     <Badge variant={item.ai_status} size="sm" />
+                    {isAdjusted && (
+                      <View style={styles.adjustedPill}>
+                        <Text style={styles.adjustedPillText}>Ajustado</Text>
+                      </View>
+                    )}
                     {evidenceUrl && (
                       <TouchableOpacity
                         onPress={() => setSelectedFrame({ url: evidenceUrl, title: item.name })}
@@ -275,12 +325,18 @@ export default function ManagerTaskDetailScreen() {
                   <Text style={styles.gridValue}>{aiQty !== null ? aiQty : '—'}</Text>
                 </View>
 
-                <View style={[styles.gridCell, styles.gridCellHighlight]}>
-                  <Text style={styles.gridLabelHighlight}>
+                <View style={[styles.gridCell, !isSubmitted && styles.gridCellHighlight]}>
+                  <Text style={!isSubmitted ? styles.gridLabelHighlight : styles.gridLabel}>
                     {isApproved ? 'Aprovado' : 'Conferido'}
                   </Text>
-                  <Text style={styles.gridValueHighlight}>
-                    {counted !== null ? counted : '—'}
+                  <Text style={!isSubmitted ? styles.gridValueHighlight : styles.gridValue}>
+                    {isApproved
+                      ? item.final !== null
+                        ? item.final
+                        : '—'
+                      : item.counted !== null
+                      ? item.counted
+                      : '—'}
                   </Text>
                 </View>
 
@@ -300,6 +356,22 @@ export default function ManagerTaskDetailScreen() {
                 )}
               </View>
 
+              {isSubmitted && (
+                <View style={styles.managerEditRow}>
+                  <Text style={styles.managerEditLabel}>Quantidade final:</Text>
+                  <Stepper
+                    value={finalValue ?? null}
+                    onChange={(val) => handleOverrideChange(item.product_id, item.counted ?? null, val)}
+                  />
+                </View>
+              )}
+
+              {wasAdjustedOnApproval && (
+                <Text style={styles.adjustedAuditText}>
+                  Ajustado na aprovação (equipe contou {item.counted}).
+                </Text>
+              )}
+
               {item.ai_note ? (
                 <Text style={styles.aiNoteText}>Nota IA: {item.ai_note}</Text>
               ) : null}
@@ -311,7 +383,11 @@ export default function ManagerTaskDetailScreen() {
         {isSubmitted && (
           <View style={styles.actionButtonsCol}>
             <Button
-              title="Aprovar e Gravar Estoque"
+              title={
+                adjustedCount > 0
+                  ? `Aprovar com ${adjustedCount} ${adjustedCount === 1 ? 'Ajuste' : 'Ajustes'}`
+                  : 'Aprovar e Gravar Estoque'
+              }
               onPress={handleApprove}
               loading={approving}
               size="lg"
@@ -484,7 +560,32 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   tableHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
+  },
+  resetOverridesLink: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  editTipBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  editTipText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.primaryDark,
+    fontWeight: '500',
   },
   tableTitle: {
     ...typography.h3,
@@ -494,6 +595,43 @@ const styles = StyleSheet.create({
   itemCard: {
     padding: 14,
     marginBottom: 12,
+  },
+  itemCardAdjusted: {
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+  },
+  adjustedPill: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  adjustedPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  managerEditRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceBorder,
+    paddingTop: 10,
+    marginTop: 6,
+  },
+  managerEditLabel: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  adjustedAuditText: {
+    fontSize: 11,
+    color: colors.primaryDark,
+    fontWeight: '600',
+    marginTop: 4,
   },
   itemTopRow: {
     flexDirection: 'row',
