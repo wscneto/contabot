@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,18 +15,36 @@ import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
 import { exportApprovedTaskCsv } from '../../../utils/exportCsv';
 import { showMessage } from '../../../utils/confirm';
+import { formatIsoDateToBR } from '../../../utils/date';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
 import { Card } from '../../../components/Card';
 import { ExportCsvButton } from '../../../components/ExportCsvButton';
 import { colors, typography } from '../../../constants/theme';
 
+type TaskFilterTab = 'all' | 'submitted' | 'open' | 'approved';
+
+const VALID_FILTERS: readonly TaskFilterTab[] = ['all', 'submitted', 'open', 'approved'];
+
 export default function ManagerTasksScreen() {
   const router = useRouter();
+  const { initialFilter } = useLocalSearchParams<{ initialFilter?: string }>();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
-  const [filterTab, setFilterTab] = useState<'all' | 'submitted' | 'open' | 'approved'>('all');
+  const validInitial =
+    initialFilter && VALID_FILTERS.includes(initialFilter as TaskFilterTab)
+      ? (initialFilter as TaskFilterTab)
+      : undefined;
+  const [prevInitial, setPrevInitial] = useState<TaskFilterTab | undefined>(validInitial);
+  const [filterTab, setFilterTab] = useState<TaskFilterTab>(validInitial ?? 'all');
   const [exportingId, setExportingId] = useState<string | null>(null);
+
+  if (validInitial !== prevInitial) {
+    setPrevInitial(validInitial);
+    if (validInitial) {
+      setFilterTab(validInitial);
+    }
+  }
 
   const { data: tasks = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['manager_tasks'],
@@ -80,7 +98,7 @@ export default function ManagerTasksScreen() {
               color={item.overdue ? colors.danger : colors.textMuted}
             />
             <Text style={[styles.dateText, item.overdue && { color: colors.danger, fontWeight: '700' }]}>
-              Prazo: {item.due_date} {item.overdue ? '(Atrasada)' : ''}
+              Prazo: {formatIsoDateToBR(item.due_date)} {item.overdue ? '(Atrasada)' : ''}
             </Text>
           </View>
         )}

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
+import { confirmAction, showMessage } from '../../../utils/confirm';
+import {
+  formatIsoDateToBR,
+  getRelativeIsoDate,
+  maskBRDateInput,
+  parseBRDateToIso,
+} from '../../../utils/date';
 import { Header } from '../../../components/Header';
 import { Input } from '../../../components/Input';
 import { Button } from '../../../components/Button';
@@ -25,11 +31,13 @@ export default function NewTaskScreen() {
   const { store, user } = useAuth();
   const params = useLocalSearchParams<{ preselectAreaId?: string }>();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayIso = getRelativeIsoDate(0);
+  const tomorrowIso = getRelativeIsoDate(1);
+  const nextWeekIso = getRelativeIsoDate(7);
 
   const [selectedAreaId, setSelectedAreaId] = useState<string>(params.preselectAreaId || '');
   const [assigneeId, setAssigneeId] = useState<string>('');
-  const [dueDate, setDueDate] = useState<string>(todayStr);
+  const [dueDateInput, setDueDateInput] = useState<string>(formatIsoDateToBR(todayIso));
   const [note, setNote] = useState<string>('');
   const [creating, setCreating] = useState(false);
 
@@ -55,22 +63,32 @@ export default function NewTaskScreen() {
       });
       defaultNote = settings.default_counting_instruction;
     } catch (error: any) {
-      Alert.alert('Erro ao carregar instrução', error.message);
+      showMessage('Erro ao carregar instrução', error.message);
       return;
     }
     if (note.trim() && note !== defaultNote) {
-      Alert.alert('Substituir instruções?', 'O texto atual será substituído pela orientação padrão de filmagem.', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Substituir', onPress: () => setNote(defaultNote) },
-      ]);
+      confirmAction(
+        'Substituir instruções?',
+        'O texto atual será substituído pela orientação padrão de filmagem.',
+        () => setNote(defaultNote),
+        { confirmText: 'Substituir' },
+      );
       return;
     }
     setNote(defaultNote);
   };
 
+  const parsedDueDateIso = parseBRDateToIso(dueDateInput);
+
   const handleCreate = async () => {
     if (!selectedAreaId) {
-      Alert.alert('Atenção', 'Selecione uma área para contar.');
+      showMessage('Atenção', 'Selecione uma área para contar.');
+      return;
+    }
+
+    const trimmedDue = dueDateInput.trim();
+    if (trimmedDue && !parsedDueDateIso) {
+      showMessage('Data inválida', 'Informe uma data válida no formato DD/MM/AAAA ou deixe sem prazo.');
       return;
     }
 
@@ -79,19 +97,26 @@ export default function NewTaskScreen() {
       await api.createTasks({
         area_ids: [selectedAreaId],
         assignee_id: assigneeId || null,
-        due_date: dueDate || null,
+        due_date: trimmedDue ? parsedDueDateIso : null,
         note: note.trim(),
       });
 
-      queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['manager_tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['manager_dashboard'] });
       router.back();
     } catch (err: any) {
-      Alert.alert('Erro ao criar contagem', err.message || 'Falha ao agendar contagem.');
+      showMessage('Erro ao criar contagem', err.message || 'Falha ao agendar contagem.');
     } finally {
       setCreating(false);
     }
   };
+
+  const quickDateOptions = [
+    { key: 'today', label: 'Hoje', value: formatIsoDateToBR(todayIso) },
+    { key: 'tomorrow', label: 'Amanhã', value: formatIsoDateToBR(tomorrowIso) },
+    { key: 'week', label: '+7 dias', value: formatIsoDateToBR(nextWeekIso) },
+    { key: 'none', label: 'Sem prazo', value: '' },
+  ];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -185,11 +210,31 @@ export default function NewTaskScreen() {
         {/* Step 3: Date & Note */}
         <Text style={styles.sectionLabel}>3. Prazo e Instruções</Text>
         <Card style={styles.card}>
+          <Text style={styles.quickDateLabel}>Atalhos de prazo</Text>
+          <View style={styles.quickDateRow}>
+            {quickDateOptions.map((opt) => {
+              const active = dueDateInput.trim() === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.quickDateChip, active && styles.quickDateChipActive]}
+                  onPress={() => setDueDateInput(opt.value)}
+                >
+                  <Text style={[styles.quickDateText, active && styles.quickDateTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           <Input
-            label="Data de Vencimento (AAAA-MM-DD)"
-            value={dueDate}
-            onChangeText={setDueDate}
-            placeholder="Ex: 2026-11-10"
+            label="Data de Vencimento (DD/MM/AAAA)"
+            value={dueDateInput}
+            onChangeText={(val) => setDueDateInput(maskBRDateInput(val))}
+            placeholder="Ex: 23/11/2026"
+            keyboardType="number-pad"
+            maxLength={10}
             leftIcon={<Ionicons name="calendar-outline" size={20} color={colors.textMuted} />}
           />
 
@@ -274,6 +319,38 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 16,
     color: colors.textMuted,
+  },
+  quickDateLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  quickDateRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  quickDateChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  quickDateChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  quickDateText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  quickDateTextActive: {
+    color: '#FFF',
   },
   submitBtn: {
     marginTop: 10,

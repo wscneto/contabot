@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { confirmAction } from '../../utils/confirm';
+import { formatIsoDateToBR } from '../../utils/date';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -94,7 +95,7 @@ export default function EmployeeHomeScreen() {
                 item.overdue && { color: colors.danger, fontWeight: '700' },
               ]}
             >
-              Prazo: {item.due_date} {item.overdue ? '(Atrasada)' : ''}
+              Prazo: {formatIsoDateToBR(item.due_date)} {item.overdue ? '(Atrasada)' : ''}
             </Text>
           </View>
         )}
