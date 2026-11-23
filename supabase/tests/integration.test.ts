@@ -74,6 +74,7 @@ Deno.test({
     const product = await rpc(manager, 'create_product', {
       p_name: 'Chocolate',
       p_variant: '90 g',
+      p_barcode: '7891000999001',
       p_photos: [photoPath],
       p_min_stock: 5,
     });
@@ -192,6 +193,7 @@ Deno.test({
     );
     const submitted = await rpc(employee, 'submit_task', { p_id: task.id, p_counts: counts });
     assertEquals(submitted.status, 'submitted');
+    await assertRejects(() => rpc(manager, 'export_approved_task', { p_id: task.id }), Error, 'aprovadas');
 
     const dashboard = await rpc(manager, 'get_dashboard');
     assertEquals(dashboard.counts.to_approve, 1);
@@ -207,6 +209,12 @@ Deno.test({
     // Aprovação com ajuste do gerente atualiza o estoque.
     const approved = await rpc(manager, 'approve_task', { p_id: task.id, p_counts: { [product.id]: 3 } });
     assertEquals(approved.status, 'approved');
+    await assertRejects(() => rpc(employee, 'export_approved_task', { p_id: task.id }), Error, 'gerente');
+    const exported = await rpc(manager, 'export_approved_task', { p_id: task.id });
+    assertEquals(exported.items, [
+      { barcode: '', name: 'Biscoito', variant: '', quantity: 0 },
+      { barcode: '7891000999001', name: 'Chocolate', variant: '90 g', quantity: 3 },
+    ]);
     const prod = await rpc(manager, 'get_product', { p_id: product.id });
     assertEquals(prod.stock, 3);
     assertEquals(prod.low_stock, true);
@@ -217,6 +225,7 @@ Deno.test({
     const outsider = await newManager('Outra Loja');
     assertEquals(await rpc(outsider, 'list_products'), []);
     await assertRejects(() => rpc(outsider, 'get_task', { p_id: task.id }), Error, 'não encontrada');
+    await assertRejects(() => rpc(outsider, 'export_approved_task', { p_id: task.id }), Error, 'não encontrada');
     const peek = await outsider.from('tasks').select('id').eq('id', task.id);
     assertEquals(peek.data, []);
     const stolen = await outsider.storage.from('media').download(photoPath);

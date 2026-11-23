@@ -7,6 +7,7 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { IMAGE_UPLOAD_SETTINGS } from '../../../supabase/functions/_shared/frame-selection';
 import { supabase } from '../lib/supabase';
 import { encodeJpeg } from './images';
+import type { ApprovedTaskExport } from '../utils/approved-task-csv';
 
 const MEDIA_BUCKET = 'media';
 const SIGNED_URL_SECONDS = 60 * 60;
@@ -122,6 +123,8 @@ export interface ImportProductItem {
   min_stock?: number | null;
 }
 
+export type { ApprovedTaskExport, ApprovedTaskExportItem } from '../utils/approved-task-csv';
+
 export const api = {
   /** URL já assinada pelas consultas; mantido para as telas exibirem imagens. */
   resolveMediaUrl(url: string | null | undefined): string | null {
@@ -207,6 +210,8 @@ export const api = {
     rpc('submit_task', { p_id: id, p_counts: counts }),
   approveTask: (id: string, counts?: Record<string, number | null>) =>
     rpc('approve_task', { p_id: id, p_counts: counts ?? null }),
+  exportApprovedTask: (id: string) =>
+    rpc<ApprovedTaskExport>('export_approved_task', { p_id: id }, false),
   requestRecount: (id: string, note: string) => rpc('request_recount', { p_id: id, p_note: note }),
   getDashboard: () => rpc('get_dashboard'),
 
