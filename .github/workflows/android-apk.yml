@@ -33,7 +33,7 @@ jobs:
       EXPO_PUBLIC_MAX_VIDEO_SECONDS: ${{ vars.EXPO_PUBLIC_MAX_VIDEO_SECONDS }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Confere variáveis do Supabase
         run: |

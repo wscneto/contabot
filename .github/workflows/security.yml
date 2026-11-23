@@ -27,7 +27,7 @@ jobs:
       contents: read
       security-events: write # publica os alertas na aba Security do repositório
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: github/codeql-action/init@v4
         with:
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # histórico completo: um segredo apagado depois continua vazado
 
