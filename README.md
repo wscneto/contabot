@@ -147,24 +147,28 @@ Ao rodar `supabase/scripts/seed-demo.ts`, as seguintes credenciais são criadas 
 
 ---
 
-## 🧪 Testes e Qualidade de Código
+## 🧪 Testes, CI/CD e Segurança
 
-### Testes unitários (seleção de quadros, validação, provedores)
+[![CI](https://github.com/wscneto/contabot/actions/workflows/ci.yml/badge.svg)](https://github.com/wscneto/contabot/actions/workflows/ci.yml)
+[![Segurança](https://github.com/wscneto/contabot/actions/workflows/security.yml/badge.svg)](https://github.com/wscneto/contabot/actions/workflows/security.yml)
+
+Todo pull request passa automaticamente por lint, checagem de tipos, testes unitários (backend e app), testes de banco (pgTAP), integração ponta a ponta, **pentest automatizado (OWASP API Top 10)**, testes de concorrência, fuzzing, auditoria de dependências, CodeQL e varredura de segredos. Estratégia completa, relatório de achados e correções em [`docs/testes-e-seguranca.md`](docs/testes-e-seguranca.md).
+
 ```bash
+# Backend: unitários + testes de propriedades (fast-check)
 cd supabase/functions && deno test tests/
-```
 
-### Teste de ponta a ponta (Supabase local + Edge Functions com `VISION_PROVIDER=mock`)
-```bash
+# App: lint, tipos e testes (Jest)
+cd mobile && pnpm lint && pnpm exec tsc --noEmit && pnpm test
+
+# Banco (pgTAP) — Supabase local rodando
+pnpm dlx supabase test db
+
+# Integração, segurança, concorrência e fuzzing — Supabase local + Edge Functions com VISION_PROVIDER=mock
+pnpm dlx supabase functions serve --env-file supabase/functions/.env.example &
 eval "$(pnpm dlx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
 SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
-  deno test -A supabase/tests/integration.test.ts
-```
-*Cobre cadastro, login por código, isolamento entre lojas (RLS e Storage), captura → identificação → contagem → envio → recontagem → aprovação → estoque, e desativação de funcionário.*
-
-### Checagem de tipos do mobile
-```bash
-cd mobile && pnpm exec tsc --noEmit
+  deno test -A supabase/tests/
 ```
 
 ---
