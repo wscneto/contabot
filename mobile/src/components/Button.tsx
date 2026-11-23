@@ -107,6 +107,11 @@ export const Button: React.FC<ButtonProps> = ({
     <Pressable
       onPress={handlePress}
       disabled={disabled || loading}
+      // Papel e nome acessíveis: durante o loading o texto some (vira spinner),
+      // então o rótulo garante que o leitor de tela ainda anuncie o botão.
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ busy: loading }}
       style={({ pressed }) => [
         styles.base,
         vStyles.btn,

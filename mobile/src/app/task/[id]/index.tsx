@@ -106,7 +106,7 @@ export default function TaskStartScreen() {
               <Ionicons name="alert-circle" size={20} color={colors.warningText} />
               <Text style={styles.recountTitle}>Recontagem Solicitada</Text>
             </View>
-            <Text style={styles.recountNote}>"{task.manager_note}"</Text>
+            <Text style={styles.recountNote}>&quot;{task.manager_note}&quot;</Text>
           </View>
         )}
 

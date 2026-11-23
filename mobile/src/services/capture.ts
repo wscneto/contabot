@@ -31,8 +31,10 @@ import {
 } from '../../../supabase/functions/_shared/frame-selection';
 import { api } from './api';
 import { encodeJpeg } from './images';
+import { normalizeVideoUri, prepareVideoUriCandidates } from '../utils/video-uri';
 
 export { evaluateAnalyzingState, initialReviewCounts };
+export { normalizeVideoUri, prepareVideoUriCandidates };
 
 export const CAPTURE_SETTINGS = {
   sampleHz: 1,
@@ -139,62 +141,6 @@ async function decodeForAnalysis(thumbnail: Parameters<typeof encodeJpeg>[0]): P
   return { data: decoded.data as Uint8Array, width: decoded.width, height: decoded.height };
 }
 
-/**
- * Garante que o vídeo existe em um caminho acessível pelo expo-video.
- *
- * No Android, `CameraView.recordAsync()` pode devolver um URI cujo arquivo é
- * removido pelo sistema antes de o `createVideoPlayer` abri-lo (ex.: cache
- * temporário do DocumentPicker ou do provedor de mídia). Copiamos o vídeo para
- * o documentDirectory/cacheDirectory do app, que é estável durante a sessão.
- */
-export function normalizeVideoUri(videoUri: string): string {
-  let uri = videoUri.trim();
-  if (uri.startsWith('content://') || uri.startsWith('http://') || uri.startsWith('https://')) {
-    return uri;
-  }
-  if (!uri.startsWith('file://')) {
-    uri = `file://${uri.startsWith('/') ? '' : '/'}${uri}`;
-  } else if (!uri.startsWith('file:///')) {
-    uri = uri.replace('file://', 'file:///');
-  }
-  return uri;
-}
-
-export function prepareVideoUriCandidates(videoUri: string): string[] {
-  const normalized = normalizeVideoUri(videoUri);
-  const candidates: string[] = [];
-
-  // Se tem %25 (dupla codificação de URL, ex: %2540 em vez de %40 no Expo Go),
-  // decodifica para o caminho real no disco do Android (primeira prioridade para MediaMetadataRetriever)
-  if (normalized.includes('%25')) {
-    try {
-      const decodedOnce = decodeURI(normalized);
-      if (!candidates.includes(decodedOnce)) {
-        candidates.push(decodedOnce);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // Caminho normalizado
-  if (!candidates.includes(normalized)) {
-    candidates.push(normalized);
-  }
-
-  // Caminho totalmente decodificado (caso o sistema use caracteres desescapados)
-  try {
-    const decodedFull = decodeURIComponent(normalized);
-    if (!candidates.includes(decodedFull)) {
-      candidates.push(decodedFull);
-    }
-  } catch {
-    // ignore
-  }
-
-  return candidates;
-}
-
 async function createPlayerForVideo(videoUri: string): Promise<{ player: VideoPlayer; duration: number }> {
   const candidates = prepareVideoUriCandidates(videoUri);
   let lastError: unknown = null;
@@ -225,6 +171,14 @@ async function createPlayerForVideo(videoUri: string): Promise<{ player: VideoPl
   throw lastError || new Error('Não foi possível inicializar o reprodutor de vídeo.');
 }
 
+/**
+ * Garante que o vídeo existe em um caminho acessível pelo expo-video.
+ *
+ * No Android, `CameraView.recordAsync()` pode devolver um URI cujo arquivo é
+ * removido pelo sistema antes de o `createVideoPlayer` abri-lo (ex.: cache
+ * temporário do DocumentPicker ou do provedor de mídia). Copiamos o vídeo para
+ * o documentDirectory/cacheDirectory do app, que é estável durante a sessão.
+ */
 export async function ensureVideoAccessible(videoUri: string): Promise<string> {
   if (Platform.OS === 'web') return videoUri;
 
