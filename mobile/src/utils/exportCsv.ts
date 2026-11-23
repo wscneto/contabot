@@ -1,41 +1,10 @@
 import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { api, type ApprovedTaskExport } from '../services/api';
+import { api } from '../services/api';
+import { buildApprovedTaskCsv, buildFilename } from './approved-task-csv';
 
-function escapeCsvCell(value: string | number): string {
-  const str = String(value);
-  if (/[",\r\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
-function buildFilename(areaName: string, approvedAt: string | null): string {
-  const slug = areaName
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'contagem';
-  const datePart = (approvedAt ?? new Date().toISOString()).slice(0, 10);
-  return `contagem-${slug}-${datePart}.csv`;
-}
-
-/** Gera CSV UTF-8 com BOM contendo código de barras, nome e quantidade. */
-export function buildApprovedTaskCsv(data: ApprovedTaskExport): string {
-  const header = ['codigo_de_barras', 'nome', 'quantidade'].join(',');
-  const rows = data.items.map((item) => {
-    const variant = item.variant?.trim();
-    const displayName = variant ? `${item.name} (${variant})` : item.name;
-    return [
-      escapeCsvCell(item.barcode ?? ''),
-      escapeCsvCell(displayName),
-      escapeCsvCell(item.quantity ?? 0),
-    ].join(',');
-  });
-  return `\uFEFF${[header, ...rows].join('\r\n')}\r\n`;
-}
+export { buildApprovedTaskCsv } from './approved-task-csv';
 
 /**
  * Busca os itens da contagem aprovada (somente gerente no backend) e exporta
@@ -55,17 +24,18 @@ export async function exportApprovedTaskCsv(taskId: string): Promise<void> {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Revogar na hora pode cancelar o download em alguns navegadores (Firefox).
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     return;
+  }
+
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error('Compartilhamento de arquivos não disponível neste aparelho.');
   }
 
   const file = new File(Paths.cache, filename);
   file.create({ overwrite: true });
   await file.write(csv);
-
-  if (!(await Sharing.isAvailableAsync())) {
-    throw new Error('Compartilhamento de arquivos não disponível neste aparelho.');
-  }
 
   await Sharing.shareAsync(file.uri, {
     mimeType: 'text/csv',
