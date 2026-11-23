@@ -11,6 +11,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useQuery } from '@tanstack/react-query';
@@ -105,7 +106,23 @@ function CameraRecorderContent() {
         maxDuration: maxDuration,
       });
       if (videoResult && videoResult.uri) {
-        setRecordedUri(videoResult.uri);
+        let stableUri = videoResult.uri;
+        // No Android/iOS, copia imediatamente para o documentDirectory do app para que
+        // o desmonte do CameraView ou a limpeza de cache do SO não apague o arquivo.
+        if (Platform.OS !== 'web' && FileSystem.documentDirectory) {
+          const safeName = `capture_${id}_${Date.now()}.mp4`;
+          const dest = `${FileSystem.documentDirectory}${safeName}`;
+          try {
+            await FileSystem.copyAsync({ from: videoResult.uri, to: dest });
+            const check = await FileSystem.getInfoAsync(dest);
+            if (check.exists && (check.size ?? 0) > 0) {
+              stableUri = dest;
+            }
+          } catch (copyErr) {
+            console.warn('[Camera] Não foi possível mover vídeo para documentDirectory, usando original:', copyErr);
+          }
+        }
+        setRecordedUri(stableUri);
       }
     } catch (err: any) {
       console.warn('Erro na gravação:', err);
@@ -141,6 +158,9 @@ function CameraRecorderContent() {
   };
 
   const handleRetake = () => {
+    if (recordedUri && Platform.OS !== 'web') {
+      FileSystem.deleteAsync(recordedUri, { idempotent: true }).catch(() => null);
+    }
     setRecordedUri(null);
     setElapsedSeconds(0);
   };

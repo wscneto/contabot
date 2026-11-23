@@ -4,12 +4,14 @@
  * mídia do bucket privado "media" são trocados por URLs assinadas.
  */
 import { FunctionsHttpError } from '@supabase/supabase-js';
+import { IMAGE_UPLOAD_SETTINGS } from '../../../supabase/functions/_shared/frame-selection';
 import { supabase } from '../lib/supabase';
 import { encodeJpeg } from './images';
 
 const MEDIA_BUCKET = 'media';
 const SIGNED_URL_SECONDS = 60 * 60;
-const PRODUCT_PHOTO_MAX_DIMENSION = 1920;
+const PRODUCT_PHOTO_MAX_DIMENSION = IMAGE_UPLOAD_SETTINGS.productPhotoMaxDimension;
+const PRODUCT_PHOTO_QUALITY = IMAGE_UPLOAD_SETTINGS.productPhotoQuality;
 
 // Caminho de mídia: {store_id}/{products|captures}/...
 const MEDIA_PATH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(products|captures)\/.+/i;
@@ -97,7 +99,7 @@ function randomId(): string {
 async function uploadProductPhotos(storeId: string, uris: string[]): Promise<string[]> {
   const paths: string[] = [];
   for (const uri of uris) {
-    const { bytes } = await encodeJpeg(uri, PRODUCT_PHOTO_MAX_DIMENSION);
+    const { bytes } = await encodeJpeg(uri, PRODUCT_PHOTO_MAX_DIMENSION, PRODUCT_PHOTO_QUALITY);
     const path = `${storeId}/products/${randomId()}.jpg`;
     await uploadJpeg(path, bytes);
     paths.push(path);
@@ -111,6 +113,13 @@ export interface ProductInput {
   barcode?: string;
   min_stock?: number | null;
   photoUris: string[];
+}
+
+export interface ImportProductItem {
+  name: string;
+  variant?: string;
+  barcode?: string;
+  min_stock?: number | null;
 }
 
 export const api = {
@@ -158,6 +167,8 @@ export const api = {
     });
   },
   archiveProduct: (id: string) => rpc('archive_product', { p_id: id }),
+  importProducts: (items: ImportProductItem[]) =>
+    rpc<{ count: number; products: any[] }>('import_products', { p_items: items }),
 
   // ----- Áreas -----
   listAreas: () => rpc('list_areas'),

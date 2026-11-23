@@ -78,6 +78,11 @@ export function toResultFrames(frames: StoredFrame[]): ResultFrame[] {
   return frames.map(({ id, path, timestamp_seconds }) => ({ id, path, timestamp_seconds }));
 }
 
+function normalizeNote(reason: string | undefined, fallback: string): string {
+  const trimmed = reason?.trim();
+  return trimmed ? trimmed : fallback;
+}
+
 /** Nenhum SKU provável: todos os itens ficam "missing" com o motivo do modelo. */
 export function noMatchItems(catalog: CatalogEntry[], matches: SkuMatch[]): ItemUpdate[] {
   return catalog.map((sku) => {
@@ -86,7 +91,7 @@ export function noMatchItems(catalog: CatalogEntry[], matches: SkuMatch[]): Item
       product_id: sku.id,
       ai_quantity: null,
       ai_status: 'missing',
-      ai_note: (match?.reason ?? 'Não identificado na captura.').slice(0, 300),
+      ai_note: normalizeNote(match?.reason, 'Não identificado na captura.'),
       evidence_frame: null,
       counted: null,
     };
@@ -137,7 +142,7 @@ export function countItems(
         product_id: sku.id,
         ai_quantity: null,
         ai_status: 'missing',
-        ai_note: (match?.reason ?? 'Não observado nos frames.').slice(0, 300),
+        ai_note: normalizeNote(match?.reason, 'Não observado nos frames.'),
         evidence_frame: null,
         counted: null,
       };
@@ -152,10 +157,10 @@ export function countItems(
       product_id: sku.id,
       ai_quantity: count.quantity,
       ai_status: status,
-      ai_note: count.reason.slice(0, 300),
+      ai_note: normalizeNote(count.reason, ''),
       evidence_frame: firstEvidence ? pathById.get(firstEvidence) ?? null : null,
-      // Itens "ok" já chegam preenchidos para a conferência do funcionário.
-      counted: status === 'ok' ? count.quantity : null,
+      // Qualquer item com quantidade sugerida pela IA (ok ou check) já chega preenchido para conferência.
+      counted: count.quantity,
     };
   });
 }

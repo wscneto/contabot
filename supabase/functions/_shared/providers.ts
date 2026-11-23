@@ -201,9 +201,39 @@ export class ChatCompletionsProvider implements VisionProvider {
   ): Promise<ProviderResult<Identification | CountResult>> {
     const { metadata, images } = prepare(video, catalog, frames, this.maxImages);
     const schema = SCHEMAS[stage];
-    // O esquema vai sempre no texto: nem todo provedor faz o modelo cumprir response_format.
+    const sampleSkuId = catalog[0]?.id ?? 'sku-id';
+    const example = stage === 'identify'
+      ? {
+        video_id: video.id,
+        matches: [{
+          sku_id: sampleSkuId,
+          status: 'present',
+          evidence_frame_ids: [video.primary_frame_id],
+          reason: 'Descrição objetiva dos elementos visuais observados.',
+        }],
+        unknown_products: [],
+      }
+      : {
+        video_id: video.id,
+        coverage_complete: true,
+        overlap_resolved: true,
+        counts: [{
+          sku_id: sampleSkuId,
+          quantity: 1,
+          incomplete: false,
+          needs_review: false,
+          reason: 'Descrição objetiva da contagem consolidada.',
+          evidence_frame_ids: [video.primary_frame_id],
+        }],
+        unknown_products: [],
+      };
+    // O esquema e um exemplo de instância preenchida vão sempre no texto: nem todo
+    // provedor aplica response_format estrito, e sem exemplo alguns modelos ecoam o próprio schema.
     const instructions = (stage === 'identify' ? IDENTIFICATION_INSTRUCTIONS : COUNTING_INSTRUCTIONS) +
-      `\n\nResponda exclusivamente com um JSON válido correspondente ao esquema:\n${JSON.stringify(schema)}`;
+      `\n\nResponda exclusivamente com um objeto JSON válido preenchido com os dados reais da análise ` +
+      `(NUNCA retorne a definição do esquema JSON como "type", "properties", "additionalProperties" ou "required").\n` +
+      `Exemplo ilustrativo de formato (substitua pelos valores reais analisados):\n${JSON.stringify(example)}\n` +
+      `Esquema JSON:\n${JSON.stringify(schema)}`;
     const userContent: unknown[] = [{ type: 'text', text: JSON.stringify(metadata) }];
     for (const { label, image } of images) {
       userContent.push(
@@ -211,99 +241,141 @@ export class ChatCompletionsProvider implements VisionProvider {
         { type: 'image_url', image_url: { url: image.dataUrl, detail: this.options.imageDetail } },
       );
     }
-    const body: Record<string, unknown> = {
-      ...this.options.extraParameters,
-      model: this.model,
-      messages: [
-        { role: 'system', content: instructions },
-        { role: 'user', content: userContent },
-      ],
-      [this.options.tokenLimitParam]: this.options.maxOutputTokens,
-    };
-    if (this.options.responseFormat === 'json_schema') {
-      body.response_format = { type: 'json_schema', json_schema: { name: stage, strict: true, schema } };
-    } else if (this.options.responseFormat === 'json_object') {
-      body.response_format = { type: 'json_object' };
-    }
+    const baseMessages: Record<string, unknown>[] = [
+      { role: 'system', content: instructions },
+      { role: 'user', content: userContent },
+    ];
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.options.apiKey.trim()) headers.Authorization = `Bearer ${this.options.apiKey.trim()}`;
 
-    let response: Response;
-    try {
-      response = await this.options.fetchImpl(this.options.endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.options.timeoutMs),
-      });
-    } catch (error) {
-      if (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-        throw new ProviderError('O provedor visual demorou além do limite. Tente novamente ou envie um vídeo menor.');
+    const skuIds = catalog.map((s) => s.id);
+    const frameIds = frames.map((f) => f.id);
+    let messages = baseMessages;
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const body: Record<string, unknown> = {
+        ...this.options.extraParameters,
+        model: this.model,
+        messages,
+        [this.options.tokenLimitParam]: this.options.maxOutputTokens,
+      };
+      if (this.options.responseFormat === 'json_schema') {
+        body.response_format = { type: 'json_schema', json_schema: { name: stage, strict: true, schema } };
+      } else if (this.options.responseFormat === 'json_object') {
+        body.response_format = { type: 'json_object' };
       }
-      throw new ProviderError('Falha de conexão com o provedor visual; tente novamente.');
-    }
 
-    let requestId = response.headers.get('x-request-id');
-    if (response.status === 413) {
-      throw new ProviderError(
-        'A requisição excedeu o tamanho máximo aceito pelo provedor (HTTP 413). Reduza VISION_MAX_IMAGES ou a resolução dos quadros.',
-        { requestId },
-      );
-    }
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      throw new ProviderError('O provedor retornou conteúdo que não é JSON.', { requestId });
-    }
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-      throw new ProviderError('O provedor retornou um envelope inválido.', { requestId });
-    }
-    const envelope = data as Record<string, unknown>;
-    const usage = (typeof envelope.usage === 'object' && envelope.usage !== null)
-      ? envelope.usage as Record<string, unknown>
-      : {};
-    requestId = requestId ?? (typeof envelope.id === 'string' ? envelope.id : null);
-    const fail = (message: string): never => {
-      throw new ProviderError(message, { usage, requestId });
-    };
+      let response: Response;
+      try {
+        response = await this.options.fetchImpl(this.options.endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        });
+      } catch (error) {
+        if (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+          throw new ProviderError('O provedor visual demorou além do limite. Tente novamente ou envie um vídeo menor.');
+        }
+        throw new ProviderError('Falha de conexão com o provedor visual; tente novamente.');
+      }
 
-    if (!response.ok || envelope.error) {
-      fail(`A API recusou a requisição (HTTP ${response.status}); confira configuração e limites.`);
-    }
-    const choices = envelope.choices;
-    if (!Array.isArray(choices) || choices.length === 0) fail('A API não retornou escolhas de resposta válidas.');
-    const choice = (choices as unknown[])[0] as Record<string, unknown>;
-    if (typeof choice !== 'object' || choice === null) fail('A API retornou escolha malformada.');
-    if (choice.finish_reason === 'length') fail('A resposta do modelo foi truncada por exceder o limite de tokens.');
-    if (choice.finish_reason === 'content_filter' || choice.finish_reason === 'refusal') {
-      fail('O modelo recusou a análise por filtro de conteúdo.');
-    }
-    const message = choice.message as Record<string, unknown> | undefined;
-    if (typeof message !== 'object' || message === null) fail('A mensagem do modelo está malformada.');
-    if (message!.refusal) fail('O modelo recusou a análise.');
-    const content = message!.content;
-    if (typeof content !== 'string' || !content.trim()) fail('O modelo retornou texto vazio ou inválido.');
+      let requestId = response.headers.get('x-request-id');
+      if (response.status === 413) {
+        throw new ProviderError(
+          'A requisição excedeu o tamanho máximo aceito pelo provedor (HTTP 413). Reduza VISION_MAX_IMAGES ou a resolução dos quadros.',
+          { requestId },
+        );
+      }
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        throw new ProviderError('O provedor retornou conteúdo que não é JSON.', { requestId });
+      }
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        throw new ProviderError('O provedor retornou um envelope inválido.', { requestId });
+      }
+      const envelope = data as Record<string, unknown>;
+      const usage = (typeof envelope.usage === 'object' && envelope.usage !== null)
+        ? envelope.usage as Record<string, unknown>
+        : {};
+      requestId = requestId ?? (typeof envelope.id === 'string' ? envelope.id : null);
+      const fail = (message: string): never => {
+        throw new ProviderError(message, { usage, requestId });
+      };
 
-    const payload = parseModelJson(content as string);
-    if (payload === undefined) fail('O modelo retornou JSON inválido.');
+      if (!response.ok || envelope.error) {
+        fail(`A API recusou a requisição (HTTP ${response.status}); confira configuração e limites.`);
+      }
+      const choices = envelope.choices;
+      if (!Array.isArray(choices) || choices.length === 0) fail('A API não retornou escolhas de resposta válidas.');
+      const choice = (choices as unknown[])[0] as Record<string, unknown>;
+      if (typeof choice !== 'object' || choice === null) fail('A API retornou escolha malformada.');
+      if (choice.finish_reason === 'length') fail('A resposta do modelo foi truncada por exceder o limite de tokens.');
+      if (choice.finish_reason === 'content_filter' || choice.finish_reason === 'refusal') {
+        fail('O modelo recusou a análise por filtro de conteúdo.');
+      }
+      const message = choice.message as Record<string, unknown> | undefined;
+      if (typeof message !== 'object' || message === null) fail('A mensagem do modelo está malformada.');
+      if (message!.refusal) fail('O modelo recusou a análise.');
+      const content = message!.content;
+      if (typeof content !== 'string' || !content.trim()) fail('O modelo retornou texto vazio ou inválido.');
 
-    const prediction = validateStage(
-      stage,
-      payload,
-      video.id,
-      catalog.map((s) => s.id),
-      frames.map((f) => f.id),
-      { usage, requestId },
-    );
-    return {
-      prediction,
-      usage,
-      model: typeof envelope.model === 'string' ? envelope.model : this.model,
-      simulated: false,
-      requestId,
-    };
+      const payload = parseModelJson(content as string);
+      if (payload === undefined) {
+        if (attempt < maxAttempts) {
+          console.warn(`[Vision] Tentativa ${attempt} de ${stage} retornou JSON inválido; tentando autocorreção...`);
+          messages = [
+            ...baseMessages,
+            { role: 'assistant', content: content as string },
+            {
+              role: 'user',
+              content:
+                `Sua resposta anterior não é um JSON válido. Responda APENAS com o objeto JSON de dados para video_id="${video.id}", sem texto extra e NUNCA retornando a definição do esquema.`,
+            },
+          ];
+          continue;
+        }
+        fail('O modelo retornou JSON inválido.');
+      }
+
+      try {
+        const prediction = validateStage(stage, payload, video.id, skuIds, frameIds, { usage, requestId });
+        return {
+          prediction,
+          usage,
+          model: typeof envelope.model === 'string' ? envelope.model : this.model,
+          simulated: false,
+          requestId,
+        };
+      } catch (err) {
+        const causeMsg = err instanceof ProviderError && err.cause instanceof Error ? err.cause.message : null;
+        if (causeMsg && attempt < maxAttempts) {
+          console.warn(`[Vision] Tentativa ${attempt} de ${stage} violou o esquema (${causeMsg}); tentando autocorreção...`);
+          messages = [
+            ...baseMessages,
+            { role: 'assistant', content: content as string },
+            {
+              role: 'user',
+              content:
+                `Sua resposta anterior violou as regras de validação (${causeMsg}). ` +
+                `Corrija e retorne APENAS o objeto JSON preenchido com os dados reais da análise para video_id="${video.id}" ` +
+                `e os SKUs solicitados (${skuIds.join(', ')}). ` +
+                `NUNCA retorne a definição do esquema JSON (não inclua chaves como "type", "properties", "additionalProperties" ou "required").`,
+            },
+          ];
+          continue;
+        }
+        if (causeMsg) {
+          console.error(`[Vision] Violação definitiva em ${stage}: ${causeMsg}`);
+        }
+        throw err;
+      }
+    }
+    throw new ProviderError('A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.');
   }
 }
 

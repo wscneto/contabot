@@ -13,6 +13,97 @@
 
 export const SELECTION_VERSION = 'device-temporal-v1';
 
+export const IMAGE_UPLOAD_SETTINGS = {
+  /** Dimensão máxima dos quadros do vídeo enviados para análise da IA (px). */
+  frameMaxDimension: 1024,
+  /** Qualidade JPEG dos quadros enviados para análise da IA (0 a 1). */
+  frameQuality: 0.75,
+  /** Dimensão máxima das fotos de referência do catálogo de produtos (px). */
+  productPhotoMaxDimension: 1024,
+  /** Qualidade JPEG das fotos de referência do catálogo (0 a 1). */
+  productPhotoQuality: 0.78,
+} as const;
+
+export interface TaskRedirectContext {
+  taskStatus?: string;
+  captureId?: string;
+  captureStatus?: string;
+  localPhase?: string;
+  localCaptureId?: string;
+  interrupted?: boolean;
+  startFailed?: boolean;
+}
+
+export interface AnalyzingScreenState {
+  isLocalUploading: boolean;
+  isStaleCapture: boolean;
+  serverFailed: boolean;
+  isFailed: boolean;
+  isCaptureDone: boolean;
+  shouldRedirect: boolean;
+}
+
+export function evaluateAnalyzingState(ctx: TaskRedirectContext): AnalyzingScreenState {
+  const isLocalUploading =
+    ctx.localPhase === 'preparing' ||
+    ctx.localPhase === 'scoring' ||
+    ctx.localPhase === 'uploading';
+
+  const hasMismatchedCaptureId = Boolean(
+    ctx.localCaptureId && ctx.captureId && ctx.localCaptureId !== ctx.captureId,
+  );
+
+  // Enquanto um novo envio local está subindo quadros (ou o cache ainda aponta para um captureId antigo),
+  // o status da captura vindo do banco pertence à tentativa anterior e deve ser ignorado.
+  const isStaleCapture = isLocalUploading || hasMismatchedCaptureId;
+
+  const serverFailed = !isStaleCapture && ctx.captureStatus === 'failed';
+  const isFailed = Boolean(
+    serverFailed ||
+      ctx.localPhase === 'failed' ||
+      ctx.interrupted ||
+      ctx.startFailed,
+  );
+
+  const isCaptureDone =
+    !isStaleCapture &&
+    (ctx.captureStatus === 'done' || ctx.captureStatus === 'completed');
+
+  const isFinalized = ctx.taskStatus === 'submitted' || ctx.taskStatus === 'approved';
+  const isReviewReady = ctx.taskStatus === 'review' && isCaptureDone;
+  const shouldRedirect = !isFailed && !isLocalUploading && (isFinalized || isReviewReady);
+
+  return {
+    isLocalUploading,
+    isStaleCapture,
+    serverFailed,
+    isFailed,
+    isCaptureDone,
+    shouldRedirect,
+  };
+}
+
+export function shouldAutoRedirectToReview(ctx: TaskRedirectContext): boolean {
+  return evaluateAnalyzingState(ctx).shouldRedirect;
+}
+
+/** Preenche os campos da conferência usando o valor já salvo ou qualquer quantidade sugerida pela IA. */
+export function initialReviewCounts(
+  items: ReadonlyArray<{ product_id: string; counted?: number | null; ai_quantity?: number | null; ai_status?: string }>,
+): Record<string, number | null> {
+  const initialCounts: Record<string, number | null> = {};
+  for (const item of items) {
+    if (item.counted !== null && item.counted !== undefined) {
+      initialCounts[item.product_id] = item.counted;
+    } else if (item.ai_quantity !== null && item.ai_quantity !== undefined) {
+      initialCounts[item.product_id] = item.ai_quantity;
+    } else {
+      initialCounts[item.product_id] = null;
+    }
+  }
+  return initialCounts;
+}
+
 export interface FrameMetrics {
   sharpness: number;
   exposure: number;
