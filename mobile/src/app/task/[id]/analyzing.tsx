@@ -12,17 +12,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../../../services/api';
-import { useAuth } from '../../../../context/AuthContext';
+import { api } from '../../../services/api';
+import { useAuth } from '../../../context/AuthContext';
 import {
   type CaptureProgress,
   evaluateAnalyzingState,
   getCaptureJob,
   subscribeCaptureJob,
-} from '../../../../services/capture';
-import { Card } from '../../../../components/Card';
-import { Button } from '../../../../components/Button';
-import { colors, typography } from '../../../../constants/theme';
+} from '../../../services/capture';
+import { Card } from '../../../components/Card';
+import { Button } from '../../../components/Button';
+import { colors, typography } from '../../../constants/theme';
 
 export default function AnalyzingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -74,7 +74,7 @@ export default function AnalyzingScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
     }
     void queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
-    router.replace(`/(employee)/task/${id}/review`);
+    router.replace(`/task/${id}/review`);
   }, [task, shouldRedirect, id, queryClient, router]);
 
   const resolveInterrupted = async (next: 'camera' | 'review') => {
@@ -87,12 +87,12 @@ export default function AnalyzingScreen() {
         }
         await queryClient.invalidateQueries({ queryKey: ['task_analyzing', id] });
         await queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
-        router.replace(`/(employee)/task/${id}/camera`);
+        router.replace(`/task/${id}/camera`);
       } else {
         await api.switchToManual(id).catch(() => null);
         await queryClient.invalidateQueries({ queryKey: ['task_analyzing', id] });
         await queryClient.invalidateQueries({ queryKey: ['task_detail', id] });
-        router.replace(`/(employee)/task/${id}/review`);
+        router.replace(`/task/${id}/review`);
       }
     } catch (error) {
       setResolving(false);
@@ -222,7 +222,7 @@ export default function AnalyzingScreen() {
             title="Conferir Manualmente (Pular IA)"
             onPress={async () => {
               await api.switchToManual(id).catch(() => null);
-              router.replace(`/(employee)/task/${id}/review`);
+              router.replace(`/task/${id}/review`);
             }}
             variant="ghost"
             style={styles.skipBtn}

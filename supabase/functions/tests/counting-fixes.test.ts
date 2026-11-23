@@ -39,15 +39,16 @@ export function createMockFileSystem(initialFiles: Record<string, MockFileInfo> 
     documentDirectory: 'file:///data/user/0/host.exp.exponent/files/',
     cacheDirectory: 'file:///data/user/0/host.exp.exponent/cache/',
     files,
-    async getInfoAsync(uri: string) {
-      return files.get(uri) ?? { exists: false, size: 0 };
+    getInfoAsync(uri: string) {
+      return Promise.resolve(files.get(uri) ?? { exists: false, size: 0 });
     },
-    async copyAsync({ from, to }) {
+    copyAsync({ from, to }) {
       const source = files.get(from);
       if (!source || !source.exists) {
-        throw new Error(`File from ${from} does not exist`);
+        return Promise.reject(new Error(`File from ${from} does not exist`));
       }
       files.set(to, { exists: true, size: source.size ?? 1024 });
+      return Promise.resolve();
     },
   };
 }
@@ -202,8 +203,8 @@ Deno.test('Item 5: lança erro amigável se arquivo de vídeo foi limpo ou não 
   let errorMsg = '';
   try {
     await resolveAccessibleVideoUri('/data/user/0/cache/Camera/deleted.mp4', fs);
-  } catch (err: any) {
-    errorMsg = err.message;
+  } catch (err) {
+    errorMsg = err instanceof Error ? err.message : String(err);
   }
   assert(errorMsg.includes('O arquivo de vídeo não foi encontrado'));
 });

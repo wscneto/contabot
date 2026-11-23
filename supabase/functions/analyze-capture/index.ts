@@ -19,7 +19,7 @@ import {
   type StoredFrame,
   toResultFrames,
 } from '../_shared/analysis.ts';
-import { corsHeaders, fail, json, readJson } from '../_shared/http.ts';
+import { corsHeaders, fail, json, readJson, stringField } from '../_shared/http.ts';
 import { type VisionImage, type VisionSettings, visionSettingsFromEnv, type VisionSku } from '../_shared/providers.ts';
 import { adminClient, bearerToken, userClient } from '../_shared/supabase.ts';
 import { type Identification, ProviderError } from '../_shared/vision.ts';
@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return fail(405, 'Use POST.');
 
   const body = await readJson(req);
-  const captureId = String(body.capture_id ?? '');
+  const captureId = stringField(body, 'capture_id') ?? '';
   if (!/^[0-9a-f-]{36}$/i.test(captureId)) return fail(422, 'Informe capture_id.');
 
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';

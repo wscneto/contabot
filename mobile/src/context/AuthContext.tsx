@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
 import { queryClient } from '../services/queryClient';
+import { authMessage } from '../utils/auth-message';
 
 export interface User {
   id: string;
@@ -22,7 +23,7 @@ export interface SystemConfig {
 }
 
 const DEFAULT_CONFIG: SystemConfig = {
-  max_video_seconds: Number(process.env.EXPO_PUBLIC_MAX_VIDEO_SECONDS) || 60,
+  max_video_seconds: Number(process.env.EXPO_PUBLIC_MAX_VIDEO_SECONDS) || 30,
 };
 
 interface AuthContextType {
@@ -39,16 +40,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-function authMessage(message: string | undefined): string {
-  if (!message) return 'Não foi possível entrar. Tente novamente.';
-  if (/invalid login credentials/i.test(message)) return 'E-mail ou senha incorretos.';
-  if (/email not confirmed/i.test(message)) return 'Confirme seu e-mail antes de entrar.';
-  if (/already registered|already exists/i.test(message)) return 'Já existe um usuário cadastrado com este e-mail.';
-  if (/password/i.test(message) && /6/.test(message)) return 'A senha deve ter pelo menos 6 caracteres.';
-  if (/fetch|network/i.test(message)) return 'Não foi possível conectar ao servidor. Verifique sua conexão.';
-  return message;
-}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);

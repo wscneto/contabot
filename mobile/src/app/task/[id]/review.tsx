@@ -15,21 +15,26 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { api } from '../../../../services/api';
-import { initialReviewCounts } from '../../../../services/capture';
-import { Header } from '../../../../components/Header';
-import { Badge } from '../../../../components/Badge';
-import { Stepper } from '../../../../components/Stepper';
-import { Button } from '../../../../components/Button';
-import { Card } from '../../../../components/Card';
-import { colors, typography } from '../../../../constants/theme';
-import { confirmAction, showMessage } from '../../../../utils/confirm';
+import { api } from '../../../services/api';
+import { initialReviewCounts } from '../../../services/capture';
+import { useAuth } from '../../../context/AuthContext';
+import { Header } from '../../../components/Header';
+import { Badge } from '../../../components/Badge';
+import { Stepper } from '../../../components/Stepper';
+import { Button } from '../../../components/Button';
+import { Card } from '../../../components/Card';
+import { colors, typography } from '../../../constants/theme';
+import { confirmAction, showMessage } from '../../../utils/confirm';
 
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  // O gerente também conta: ao terminar a conferência ele aprova direto, sem
+  // enviar para si mesmo.
+  const isManager = user?.role === 'manager';
 
   // Local state for counts by product_id
   const [counts, setCounts] = useState<Record<string, number | null>>({});
@@ -70,18 +75,46 @@ export default function ReviewScreen() {
   };
 
   const handleSubmit = async () => {
+    const finish = isManager ? confirmApprove : doSubmit;
     // Check if any item is uncounted
     const uncounted = task.items.filter((item: any) => counts[item.product_id] === null);
     if (uncounted.length > 0) {
       confirmAction(
         'Itens Pendentes',
-        `Ainda há ${uncounted.length} ${uncounted.length === 1 ? 'produto sem quantidade' : 'produtos sem quantidade'}. Deseja enviar mesmo assim?`,
-        doSubmit,
-        { confirmText: 'Enviar assim mesmo', cancelText: 'Revisar' },
+        `Ainda há ${uncounted.length} ${uncounted.length === 1 ? 'produto sem quantidade' : 'produtos sem quantidade'}. Deseja ${isManager ? 'aprovar' : 'enviar'} mesmo assim?`,
+        finish,
+        { confirmText: isManager ? 'Continuar' : 'Enviar assim mesmo', cancelText: 'Revisar' },
       );
       return;
     }
-    doSubmit();
+    finish();
+  };
+
+  const confirmApprove = () => {
+    confirmAction(
+      'Aprovar Contagem',
+      'As quantidades conferidas serão gravadas no estoque oficial da loja.',
+      doApprove,
+      { confirmText: 'Aprovar e Gravar' },
+    );
+  };
+
+  const doApprove = async () => {
+    setSubmitting(true);
+    try {
+      await api.approveTask(id, counts);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => null);
+      }
+      void queryClient.invalidateQueries();
+      showMessage('Contagem Aprovada!', 'As quantidades foram gravadas no estoque da loja.', () =>
+        router.dismissTo(`/(manager)/tasks/${id}`),
+      );
+    } catch (err: any) {
+      showMessage('Erro ao aprovar', err.message || 'Falha na aprovação.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const doSubmit = async () => {
@@ -226,7 +259,9 @@ export default function ReviewScreen() {
           <Ionicons name="lock-closed" size={16} color={colors.purpleText} />
           <Text style={styles.readOnlyText}>
             {task.status === 'submitted'
-              ? 'Contagem enviada ao gerente. Aguardando aprovação.'
+              ? isManager
+                ? 'Contagem enviada pela equipe. Aprove ou peça recontagem nos detalhes.'
+                : 'Contagem enviada ao gerente. Aguardando aprovação.'
               : 'Contagem aprovada e finalizada.'}
           </Text>
         </View>
@@ -262,17 +297,19 @@ export default function ReviewScreen() {
           <View style={styles.buttonsRow}>
             <Button
               title="Refilmar"
-              onPress={() => router.push(`/(employee)/task/${id}/camera`)}
+              onPress={() => router.push(`/task/${id}/camera`)}
               variant="outline"
               icon={<Ionicons name="videocam-outline" size={18} color={colors.textPrimary} />}
               style={styles.reRecordBtn}
             />
 
             <Button
-              title="Enviar para o Gerente"
+              title={isManager ? 'Aprovar e Gravar' : 'Enviar para o Gerente'}
               onPress={handleSubmit}
               loading={submitting}
-              iconRight={<Ionicons name="arrow-forward" size={18} color="#FFF" />}
+              iconRight={
+                <Ionicons name={isManager ? 'checkmark-circle-outline' : 'arrow-forward'} size={18} color="#FFF" />
+              }
               style={styles.submitBtn}
             />
           </View>

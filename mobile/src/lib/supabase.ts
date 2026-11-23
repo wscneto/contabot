@@ -1,6 +1,11 @@
+// Versões anteriores guardavam a sessão no localStorage do expo-sqlite (sem
+// criptografia). O polyfill continua instalado só para migrar essa sessão para o
+// SecureStore na primeira leitura; depois a cópia antiga é apagada.
 import 'expo-sqlite/localStorage/install';
 import { AppState, Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { createClient } from '@supabase/supabase-js';
+import { createSecureSessionStorage } from './secure-session-storage';
 
 export const getSupabaseUrl = (): string => {
   const envUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -29,7 +34,8 @@ if (!isSupabaseConfigured) {
 
 export const supabase = createClient(supabaseUrl || 'http://127.0.0.1:54321', supabaseKey || 'missing-key', {
   auth: {
-    storage: localStorage,
+    // Web: o SecureStore não existe no navegador; fica o localStorage.
+    storage: Platform.OS === 'web' ? localStorage : createSecureSessionStorage(SecureStore, localStorage),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,

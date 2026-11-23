@@ -16,7 +16,6 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { Badge } from '../../components/Badge';
 import { Card } from '../../components/Card';
-import { Button } from '../../components/Button';
 import { colors, typography } from '../../constants/theme';
 
 export default function EmployeeHomeScreen() {
@@ -55,7 +54,7 @@ export default function EmployeeHomeScreen() {
     return (
       <Card
         style={[styles.taskCard, isRecount && styles.recountCard]}
-        onPress={() => router.push(`/(employee)/task/${item.id}`)}
+        onPress={() => router.push(`/task/${item.id}`)}
       >
         {isRecount && (
           <View style={styles.recountBanner}>
@@ -68,7 +67,7 @@ export default function EmployeeHomeScreen() {
 
         {isRecount && item.manager_note ? (
           <View style={styles.noteBox}>
-            <Text style={styles.noteText}>"{item.manager_note}"</Text>
+            <Text style={styles.noteText}>&quot;{item.manager_note}&quot;</Text>
           </View>
         ) : null}
 

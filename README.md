@@ -14,7 +14,7 @@ Projetado especificamente para as operações do dia a dia no varejo, dividindo 
 contabot/
 ├── mobile/                  # App Expo SDK 58 (Expo Router)
 │   ├── src/
-│   │   ├── app/             # Rotas: (auth), (employee), (manager)
+│   │   ├── app/             # Rotas: (auth), (employee), (manager) e task/ (contagem, usada pelos dois)
 │   │   ├── components/      # Design System (Button, Card, Stepper, Badge, QRCodeModal, Input)
 │   │   ├── lib/supabase.ts  # Cliente Supabase (sessão persistida com expo-sqlite)
 │   │   └── services/
@@ -131,7 +131,7 @@ Ao rodar `supabase/scripts/seed-demo.ts`, as seguintes credenciais são criadas 
 ### 1. Fluxo do Funcionário (Simples, Rápido e Sem Ruído)
 1. **Login Instantâneo**: Digita o código de 8 dígitos ou escaneia o QR Code fornecido pelo gerente.
 2. **Minhas Contagens**: Lista somente as áreas que ele precisa contar no momento. Destaque visual em vermelho para solicitações de **Recontagem**.
-3. **Câmera Guiada**: Interface com retículo central, nível de estabilidade, dicas de filmagem ("Mantenha velocidade constante", "Mostre topo e laterais"), botão de ligar/desligar lanterna (torch) e temporizador de 60 segundos com parada automática.
+3. **Câmera Guiada**: Interface com retículo central, nível de estabilidade, dicas de filmagem ("Mantenha velocidade constante", "Mostre topo e laterais"), botão de ligar/desligar lanterna (torch) e temporizador de 30 segundos com parada automática. Antes de gravar, a tela pede para filmar só a prateleira da contagem, começando por uma vista de cima; vídeos da galeria aceitam até 60 s.
 4. **Análise em Segundo Plano**: O celular escolhe e envia os melhores quadros; em seguida a IA identifica e conta os produtos no servidor, com o progresso de cada etapa na tela.
 5. **Conferência na Prateleira**: Tela com cartões grandes e botões `+` e `-` ergonômicos (com feedback tátil Haptics). Para cada produto, o funcionário pode tocar em **"Ver Evidência"** para abrir a foto ampliada onde a IA detectou as unidades.
 6. **Submissão**: Ao clicar em "Confirmar e Enviar", a contagem é enviada para validação da gerência.
@@ -147,24 +147,28 @@ Ao rodar `supabase/scripts/seed-demo.ts`, as seguintes credenciais são criadas 
 
 ---
 
-## 🧪 Testes e Qualidade de Código
+## 🧪 Testes, CI/CD e Segurança
 
-### Testes unitários (seleção de quadros, validação, provedores)
+[![CI](https://github.com/wscneto/contabot/actions/workflows/ci.yml/badge.svg)](https://github.com/wscneto/contabot/actions/workflows/ci.yml)
+[![Segurança](https://github.com/wscneto/contabot/actions/workflows/security.yml/badge.svg)](https://github.com/wscneto/contabot/actions/workflows/security.yml)
+
+Todo pull request passa automaticamente por lint, checagem de tipos, testes unitários (backend e app), testes de banco (pgTAP), integração ponta a ponta, **pentest automatizado (OWASP API Top 10)**, testes de concorrência, fuzzing, auditoria de dependências, CodeQL e varredura de segredos. Estratégia completa, relatório de achados e correções em [`docs/testes-e-seguranca.md`](docs/testes-e-seguranca.md).
+
 ```bash
+# Backend: unitários + testes de propriedades (fast-check)
 cd supabase/functions && deno test tests/
-```
 
-### Teste de ponta a ponta (Supabase local + Edge Functions com `VISION_PROVIDER=mock`)
-```bash
+# App: lint, tipos e testes (Jest)
+cd mobile && pnpm lint && pnpm exec tsc --noEmit && pnpm test
+
+# Banco (pgTAP) — Supabase local rodando
+pnpm dlx supabase test db
+
+# Integração, segurança, concorrência e fuzzing — Supabase local + Edge Functions com VISION_PROVIDER=mock
+pnpm dlx supabase functions serve --env-file supabase/functions/.env.example &
 eval "$(pnpm dlx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
 SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
-  deno test -A supabase/tests/integration.test.ts
-```
-*Cobre cadastro, login por código, isolamento entre lojas (RLS e Storage), captura → identificação → contagem → envio → recontagem → aprovação → estoque, e desativação de funcionário.*
-
-### Checagem de tipos do mobile
-```bash
-cd mobile && pnpm exec tsc --noEmit
+  deno test -A supabase/tests/
 ```
 
 ---

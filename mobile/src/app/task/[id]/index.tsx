@@ -14,17 +14,20 @@ import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { api } from '../../../../services/api';
-import { startCaptureJob } from '../../../../services/capture';
-import { Header } from '../../../../components/Header';
-import { Badge } from '../../../../components/Badge';
-import { Button } from '../../../../components/Button';
-import { Card } from '../../../../components/Card';
-import { colors, typography } from '../../../../constants/theme';
+import { api } from '../../../services/api';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../services/capture';
+import { useAuth } from '../../../context/AuthContext';
+import { Header } from '../../../components/Header';
+import { Badge } from '../../../components/Badge';
+import { Button } from '../../../components/Button';
+import { Card } from '../../../components/Card';
+import { colors, typography } from '../../../constants/theme';
 
 export default function TaskStartScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { config } = useAuth();
+  const maxVideoSeconds = Math.min(config?.max_video_seconds || 30, CAPTURE_SETTINGS.maxDurationSeconds);
 
   const [uploadingGallery, setUploadingGallery] = useState(false);
 
@@ -61,9 +64,19 @@ export default function TaskStartScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        // duration vem em milissegundos. Avisa antes de criar a captura, em vez
+        // de falhar depois na tela de análise.
+        const seconds = (asset.duration ?? 0) / 1000;
+        if (seconds > CAPTURE_SETTINGS.maxDurationSeconds + 0.5) {
+          Alert.alert(
+            'Vídeo longo demais',
+            `Este vídeo tem ${Math.round(seconds)} s. Use até ${CAPTURE_SETTINGS.maxDurationSeconds} s mostrando só a prateleira desta contagem: em vídeos longos a IA pode deixar produtos de fora.`,
+          );
+          return;
+        }
         setUploadingGallery(true);
         startCaptureJob(task.id, asset.uri);
-        router.replace(`/(employee)/task/${task.id}/analyzing`);
+        router.replace(`/task/${task.id}/analyzing`);
       }
     } catch (err: any) {
       Alert.alert('Erro ao enviar vídeo', err.message || 'Não foi possível enviar o vídeo.');
@@ -75,7 +88,7 @@ export default function TaskStartScreen() {
   const handleManualCounting = async () => {
     try {
       await api.switchToManual(task.id);
-      router.replace(`/(employee)/task/${task.id}/review`);
+      router.replace(`/task/${task.id}/review`);
     } catch (err: any) {
       Alert.alert('Erro', err.message || 'Não foi possível iniciar contagem manual.');
     }
@@ -93,7 +106,7 @@ export default function TaskStartScreen() {
               <Ionicons name="alert-circle" size={20} color={colors.warningText} />
               <Text style={styles.recountTitle}>Recontagem Solicitada</Text>
             </View>
-            <Text style={styles.recountNote}>"{task.manager_note}"</Text>
+            <Text style={styles.recountNote}>&quot;{task.manager_note}&quot;</Text>
           </View>
         )}
 
@@ -126,7 +139,7 @@ export default function TaskStartScreen() {
             </Text>
             <Button
               title="Acompanhar Análise"
-              onPress={() => router.push(`/(employee)/task/${task.id}/analyzing`)}
+              onPress={() => router.push(`/task/${task.id}/analyzing`)}
               size="lg"
             />
           </Card>
@@ -140,7 +153,7 @@ export default function TaskStartScreen() {
             </Text>
             <Button
               title="Ir para Conferência"
-              onPress={() => router.push(`/(employee)/task/${task.id}/review`)}
+              onPress={() => router.push(`/task/${task.id}/review`)}
               size="lg"
             />
           </Card>
@@ -154,7 +167,7 @@ export default function TaskStartScreen() {
             {/* Method 1: Camera (Primary) */}
             <TouchableOpacity
               style={styles.methodCardPrimary}
-              onPress={() => router.push(`/(employee)/task/${task.id}/camera`)}
+              onPress={() => router.push(`/task/${task.id}/camera`)}
             >
               <View style={styles.methodIconCircle}>
                 <Ionicons name="videocam" size={28} color={colors.surface} />
@@ -162,7 +175,7 @@ export default function TaskStartScreen() {
               <View style={styles.methodTextCol}>
                 <Text style={styles.methodTitlePrimary}>Filmar Prateleira (Recomendado)</Text>
                 <Text style={styles.methodDescPrimary}>
-                  Grave um vídeo curto de até 60 segundos. A IA identificará os produtos e sugerirá as quantidades automaticamente.
+                  Grave até {maxVideoSeconds} segundos só desta prateleira, começando de cima. A IA identificará os produtos e sugerirá as quantidades.
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.surface} />
@@ -184,7 +197,7 @@ export default function TaskStartScreen() {
               <View style={styles.methodTextCol}>
                 <Text style={styles.methodTitle}>Escolher Vídeo da Galeria</Text>
                 <Text style={styles.methodDesc}>
-                  Selecione um vídeo gravado previamente no seu celular.
+                  Selecione um vídeo de até {CAPTURE_SETTINGS.maxDurationSeconds} segundos gravado só desta prateleira.
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />

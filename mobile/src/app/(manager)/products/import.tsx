@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,6 +20,8 @@ import { Header } from '../../../components/Header';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { showMessage } from '../../../utils/confirm';
+import { parseProductWorkbook, readProductFile } from '../../../utils/product-import';
+import { base64ToBytes } from '../../../utils/base64';
 import { colors, typography } from '../../../constants/theme';
 
 const readUriAsBase64 = async (rawUri: string): Promise<string> => {
@@ -105,110 +106,6 @@ export default function ImportProductsScreen() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const parseSheetRows = (rawRows: any[][]): ImportProductItem[] => {
-    if (!rawRows || rawRows.length === 0) return [];
-
-    // Localiza a linha do cabeçalho nas primeiras 5 linhas que contenham palavras-chave
-    let headerRowIdx = 0;
-    for (let r = 0; r < Math.min(rawRows.length, 5); r++) {
-      const row = rawRows[r] || [];
-      const hasKeywords = row.some((col: any) => {
-        const str = String(col || '').toLowerCase().trim();
-        return /descri|nome|produto|product|barcode|barra|ean|sap/i.test(str);
-      });
-      if (hasKeywords) {
-        headerRowIdx = r;
-        break;
-      }
-    }
-
-    const headerRow = rawRows[headerRowIdx] || [];
-    let nameIdx = -1;
-    let variantIdx = -1;
-    let barcodeIdx = -1;
-    let minStockIdx = -1;
-
-    // 1. Nome/Descrição: priorizar 'descrição', 'descricao', 'nome'
-    headerRow.forEach((col: any, idx: number) => {
-      const str = String(col || '').toLowerCase().trim();
-      if (/descri|nome/i.test(str) && !/c[oó]d/i.test(str) && nameIdx === -1) {
-        nameIdx = idx;
-      }
-    });
-
-    // Se não encontrou 'descrição'/'nome', procura 'produto' ou 'item' (sem ser código)
-    if (nameIdx === -1) {
-      headerRow.forEach((col: any, idx: number) => {
-        const str = String(col || '').toLowerCase().trim();
-        if (/produto|product|item/i.test(str) && !/c[oó]d/i.test(str) && nameIdx === -1) {
-          nameIdx = idx;
-        }
-      });
-    }
-
-    // 2. Código de barras / EAN
-    headerRow.forEach((col: any, idx: number) => {
-      const str = String(col || '').toLowerCase().trim();
-      if (/barra|ean|gtin|barcode/i.test(str) && barcodeIdx === -1) {
-        barcodeIdx = idx;
-      }
-    });
-
-    // 3. Variante / Gramatura
-    headerRow.forEach((col: any, idx: number) => {
-      const str = String(col || '').toLowerCase().trim();
-      if (/variante|variant|gramatura|peso|apresenta/i.test(str) && variantIdx === -1) {
-        variantIdx = idx;
-      }
-    });
-
-    // 4. Estoque mínimo / Mínimo
-    headerRow.forEach((col: any, idx: number) => {
-      const str = String(col || '').toLowerCase().trim();
-      if (/m[ií]nimo|min_stock|estoque_min/i.test(str) && minStockIdx === -1) {
-        minStockIdx = idx;
-      }
-    });
-
-    let startRow = headerRowIdx + 1;
-    if (nameIdx === -1) {
-      nameIdx = 0;
-      startRow = 0;
-    }
-
-    const items: ImportProductItem[] = [];
-    for (let i = startRow; i < rawRows.length; i++) {
-      const row = rawRows[i];
-      if (!row || row.length === 0) continue;
-      const rawName = row[nameIdx] !== undefined ? String(row[nameIdx]).trim() : '';
-      if (!rawName) continue;
-
-      // Ignora se o nome for idêntico ao rótulo do cabeçalho
-      const lowerName = rawName.toLowerCase();
-      if (lowerName === 'descrição' || lowerName === 'descricao' || lowerName === 'nome' || lowerName === 'produto') {
-        continue;
-      }
-
-      const rawVariant =
-        variantIdx !== -1 && row[variantIdx] !== undefined ? String(row[variantIdx]).trim() : '';
-      const rawBarcode =
-        barcodeIdx !== -1 && row[barcodeIdx] !== undefined ? String(row[barcodeIdx]).trim() : '';
-      let minStock: number | null = null;
-      if (minStockIdx !== -1 && row[minStockIdx] !== undefined) {
-        const parsed = parseInt(String(row[minStockIdx]).replace(/\D/g, ''), 10);
-        if (!isNaN(parsed) && parsed >= 0) minStock = parsed;
-      }
-
-      items.push({
-        name: rawName,
-        variant: rawVariant,
-        barcode: rawBarcode,
-        min_stock: minStock,
-      });
-    }
-    return items;
-  };
-
   const handlePickFile = async () => {
     setError(null);
     try {
@@ -242,39 +139,16 @@ export default function ImportProductsScreen() {
           const fetchRes = await fetch(asset.uri);
           arrayBuffer = await fetchRes.arrayBuffer();
         }
-        workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+        workbook = readProductFile(new Uint8Array(arrayBuffer));
       } else {
         // No ambiente mobile nativo (Android / iOS):
         // Usa readUriAsBase64 para contornar a restrição de sandbox do Expo Go no Android
         const base64 = await readUriAsBase64(asset.uri);
-        workbook = XLSX.read(base64, { type: 'base64' });
+        workbook = readProductFile(base64ToBytes(base64));
       }
 
-      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-        throw new Error('Nenhuma planilha encontrada no arquivo selecionado.');
-      }
-
-      // Procura a primeira aba com linhas
-      let targetSheet = workbook.Sheets[workbook.SheetNames[0]];
-      let rawRows = XLSX.utils.sheet_to_json<any[]>(targetSheet, { header: 1 });
-
-      if ((!rawRows || rawRows.length === 0) && workbook.SheetNames.length > 1) {
-        for (let s = 1; s < workbook.SheetNames.length; s++) {
-          const sheet = workbook.Sheets[workbook.SheetNames[s]];
-          const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
-          if (rows && rows.length > 0) {
-            targetSheet = sheet;
-            rawRows = rows;
-            break;
-          }
-        }
-      }
-
-      const items = parseSheetRows(rawRows);
-
-      if (items.length === 0) {
-        throw new Error('Nenhum produto válido foi identificado nas linhas do arquivo.');
-      }
+      // Lança erro com mensagem amigável se não houver abas ou produtos válidos
+      const items = parseProductWorkbook(workbook);
 
       setFileName(asset.name);
       setFileSize(asset.size ?? null);
@@ -344,7 +218,7 @@ export default function ImportProductsScreen() {
           <View style={styles.ruleItem}>
             <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
             <Text style={styles.ruleText}>
-              <Text style={styles.bold}>Coluna de Nomes:</Text> Obrigatória (ex: "Nome", "Descrição", "Produto").
+              <Text style={styles.bold}>Coluna de Nomes:</Text> Obrigatória (ex: &quot;Nome&quot;, &quot;Descrição&quot;, &quot;Produto&quot;).
             </Text>
           </View>
           <View style={styles.ruleItem}>

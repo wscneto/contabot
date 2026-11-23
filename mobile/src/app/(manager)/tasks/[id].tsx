@@ -59,6 +59,7 @@ export default function ManagerTaskDetailScreen() {
   const isManager = user?.role === 'manager';
   const isSubmitted = task.status === 'submitted';
   const isApproved = task.status === 'approved';
+  const canCount = ['open', 'analyzing', 'review'].includes(task.status);
 
   const handleExportCsv = async () => {
     if (!isManager || !isApproved || exporting) return;
@@ -176,7 +177,7 @@ export default function ManagerTaskDetailScreen() {
             <View style={styles.recountBox}>
               <Ionicons name="alert-circle" size={16} color={colors.warningText} />
               <Text style={styles.recountText}>
-                Recontagem ativa: "{task.manager_note}"
+                Recontagem ativa: &quot;{task.manager_note}&quot;
               </Text>
             </View>
           )}
@@ -201,6 +202,23 @@ export default function ManagerTaskDetailScreen() {
             </View>
           )}
         </Card>
+
+        {/* O gerente também pode filmar ou conferir, pelo mesmo fluxo da equipe. */}
+        {canCount && (
+          <Button
+            title={
+              task.status === 'open'
+                ? 'Contar Agora'
+                : task.status === 'analyzing'
+                ? 'Acompanhar Análise'
+                : 'Conferir Números'
+            }
+            onPress={() => router.push(`/task/${id}`)}
+            size="lg"
+            icon={<Ionicons name="videocam-outline" size={20} color="#FFF" />}
+            style={styles.countBtn}
+          />
+        )}
 
         {/* Comparison Table Header */}
         <View style={styles.tableHeaderRow}>
@@ -461,6 +479,9 @@ const styles = StyleSheet.create({
     color: colors.warningText,
     fontWeight: '600',
     flex: 1,
+  },
+  countBtn: {
+    marginBottom: 20,
   },
   tableHeaderRow: {
     marginBottom: 12,

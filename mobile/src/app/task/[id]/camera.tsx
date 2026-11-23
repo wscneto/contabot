@@ -9,22 +9,46 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
-import { useAuth } from '../../../../context/AuthContext';
-import { startCaptureJob } from '../../../../services/capture';
-import { Button } from '../../../../components/Button';
-import { colors } from '../../../../constants/theme';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '../../../context/AuthContext';
+import { api } from '../../../services/api';
+import { CAPTURE_SETTINGS, startCaptureJob } from '../../../services/capture';
+import { Button } from '../../../components/Button';
+import { colors } from '../../../constants/theme';
+
+/** Segundos iniciais da gravação dedicados à vista de cima da prateleira. */
+const OVERVIEW_SECONDS = 5;
 
 export default function CameraRecorderScreen() {
+  // This route is a native full-screen modal. Measure safe areas in its own
+  // native surface instead of inheriting the presenting screen's metrics.
+  return (
+    <SafeAreaProvider>
+      <CameraRecorderContent />
+    </SafeAreaProvider>
+  );
+}
+
+function CameraRecorderContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { config } = useAuth();
-  const maxDuration = config?.max_video_seconds || 60;
+  // Teste com IA real: em varreduras longas a identificação perde produtos.
+  // Vídeo curto de uma única prateleira, nunca acima do teto do processamento.
+  const maxDuration = Math.min(config?.max_video_seconds || 30, CAPTURE_SETTINGS.maxDurationSeconds);
+
+  // Mesma consulta da tela da contagem (vem do cache): nome da área a filmar.
+  const { data: task } = useQuery({
+    queryKey: ['task_detail', id],
+    queryFn: () => api.getTask(id),
+    enabled: Boolean(id),
+  });
+  const areaName: string | undefined = task?.area?.name;
 
   const cameraRef = useRef<CameraView>(null);
   // A análise usa só imagens: a câmera grava sem áudio (prop mute) e o app não
@@ -86,6 +110,8 @@ export default function CameraRecorderScreen() {
         // No Android/iOS, copia imediatamente para o documentDirectory do app para que
         // o desmonte do CameraView ou a limpeza de cache do SO não apague o arquivo.
         if (Platform.OS !== 'web' && FileSystem.documentDirectory) {
+          // Roda no handler de gravação (não no render): falso positivo da regra de pureza.
+          // eslint-disable-next-line react-hooks/purity
           const safeName = `capture_${id}_${Date.now()}.mp4`;
           const dest = `${FileSystem.documentDirectory}${safeName}`;
           try {
@@ -126,7 +152,7 @@ export default function CameraRecorderScreen() {
     try {
       // Seleção de quadros, envio e análise seguem em segundo plano.
       startCaptureJob(id, recordedUri);
-      router.replace(`/(employee)/task/${id}/analyzing`);
+      router.replace(`/task/${id}/analyzing`);
     } catch (err: any) {
       Alert.alert('Erro ao enviar vídeo', err.message || 'Falha no envio.');
       setIsUploading(false);
@@ -146,6 +172,16 @@ export default function CameraRecorderScreen() {
     const s = secs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // Orientação que acompanha a gravação: primeiro a visão geral (de onde a IA
+  // conta as fileiras), depois a passagem pela frente (de onde identifica).
+  const remaining = maxDuration - elapsedSeconds;
+  const recordingHint =
+    remaining <= 5
+      ? `Finalizando em ${remaining}s…`
+      : elapsedSeconds < OVERVIEW_SECONDS
+        ? 'Comece de cima: mostre a prateleira inteira'
+        : 'Agora passe devagar pela frente das caixas';
 
   // If permission not determined yet
   if (!cameraPermission) {
@@ -185,71 +221,97 @@ export default function CameraRecorderScreen() {
     <View style={styles.container}>
       {/* Camera View */}
       {!recordedUri ? (
-        <CameraView
-          ref={cameraRef}
-          style={styles.camera}
-          facing="back"
-          mode="video"
-          mute
-          enableTorch={torch}
-        >
-          {/* Top Bar with Guidelines & Torch */}
-          <SafeAreaView style={styles.topBar}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.iconCircle}>
-              <Ionicons name="close" size={24} color="#FFF" />
-            </TouchableOpacity>
-
-            <View style={styles.timerBadge}>
-              <View style={[styles.timerDot, isRecording && styles.timerDotActive]} />
-              <Text style={styles.timerText}>
-                {formatTimer(elapsedSeconds)} / {formatTimer(maxDuration)}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => setTorch(!torch)}
-              style={[styles.iconCircle, torch && styles.iconCircleActive]}
-            >
-              <Ionicons name={torch ? 'flash' : 'flash-off'} size={22} color="#FFF" />
-            </TouchableOpacity>
-          </SafeAreaView>
-
-          {/* Guide Overlay */}
-          <View style={styles.guideContainer} pointerEvents="none">
-            <View style={styles.guideBox}>
-              <View style={[styles.corner, styles.cornerTL]} />
-              <View style={[styles.corner, styles.cornerTR]} />
-              <View style={[styles.corner, styles.cornerBL]} />
-              <View style={[styles.corner, styles.cornerBR]} />
-              <Text style={styles.guideText}>
-                {isRecording
-                  ? 'Mova o celular devagar para a direita ou esquerda…'
-                  : 'Enquadre a prateleira com todas as caixas visíveis'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Bottom Controls */}
-          <SafeAreaView style={styles.bottomBar}>
-            <View style={styles.controlsRow}>
-              <View style={{ width: 50 }} />
-
-              {/* Shutter Button */}
+        <View style={styles.liveContainer}>
+          <CameraView
+            ref={cameraRef}
+            style={styles.camera}
+            facing="back"
+            mode="video"
+            mute
+            enableTorch={torch}
+          />
+          {/* CameraView does not support children: keep controls in a native sibling layer. */}
+          <View style={styles.controlsOverlay} pointerEvents="box-none" collapsable={false}>
+            {/* Top Bar with Guidelines & Torch */}
+            <SafeAreaView style={styles.topBar} edges={['top', 'left', 'right']}>
               <TouchableOpacity
-                onPress={isRecording ? stopRecording : startRecording}
-                style={[styles.shutterOuter, isRecording && styles.shutterOuterRecording]}
-                activeOpacity={0.8}
+                onPress={() => router.back()}
+                style={styles.iconCircle}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar câmera"
               >
-                <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
 
-              <View style={{ width: 50 }} />
+              <View style={styles.timerBadge}>
+                <View style={[styles.timerDot, isRecording && styles.timerDotActive]} />
+                <Text style={styles.timerText}>
+                  {formatTimer(elapsedSeconds)} / {formatTimer(maxDuration)}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setTorch(!torch)}
+                style={[styles.iconCircle, torch && styles.iconCircleActive]}
+              >
+                <Ionicons name={torch ? 'flash' : 'flash-off'} size={22} color="#FFF" />
+              </TouchableOpacity>
+            </SafeAreaView>
+
+            {/* Guide Overlay */}
+            <View style={styles.guideContainer} pointerEvents="none">
+              <View style={styles.guideBox}>
+                <View style={[styles.corner, styles.cornerTL]} />
+                <View style={[styles.corner, styles.cornerTR]} />
+                <View style={[styles.corner, styles.cornerBL]} />
+                <View style={[styles.corner, styles.cornerBR]} />
+                <Text style={styles.guideText}>
+                  {isRecording ? recordingHint : 'Enquadre só a prateleira desta contagem'}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.shutterHint}>
-              {isRecording ? 'Toque no quadrado para finalizar' : 'Toque no botão para iniciar filmagem'}
-            </Text>
-          </SafeAreaView>
-        </CameraView>
+
+            {!isRecording && (
+              <View style={styles.tipsCard} pointerEvents="none">
+                <Text style={styles.tipsTitle}>
+                  {areaName ? `Filme só: ${areaName}` : 'Filme só a prateleira desta contagem'}
+                </Text>
+                {[
+                  ['eye-outline', `Comece de cima, mostrando todas as caixas (${OVERVIEW_SECONDS} s)`],
+                  ['swap-horizontal', 'Depois passe devagar pela frente dos produtos'],
+                  ['timer-outline', `Até ${maxDuration} s. Outras prateleiras atrapalham a contagem`],
+                ].map(([icon, text]) => (
+                  <View key={text} style={styles.tipRow}>
+                    <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={16} color="#FFF" />
+                    <Text style={styles.tipText}>{text}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Bottom Controls */}
+            <SafeAreaView style={styles.bottomBar} edges={['bottom', 'left', 'right']}>
+              <View style={styles.controlsRow}>
+                <View style={{ width: 50 }} />
+
+                {/* Shutter Button */}
+                <TouchableOpacity
+                  onPress={isRecording ? stopRecording : startRecording}
+                  style={[styles.shutterOuter, isRecording && styles.shutterOuterRecording]}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
+                </TouchableOpacity>
+
+                <View style={{ width: 50 }} />
+              </View>
+              <Text style={styles.shutterHint}>
+                {isRecording ? 'Toque no quadrado para finalizar' : 'Toque no botão para iniciar filmagem'}
+              </Text>
+            </SafeAreaView>
+          </View>
+        </View>
       ) : (
         /* Video Recorded Confirmation Screen */
         <SafeAreaView style={styles.previewContainer}>
@@ -297,8 +359,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  camera: {
+  liveContainer: {
     flex: 1,
+  },
+  camera: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  controlsOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 1,
   },
   topBar: {
     flexDirection: 'row',
@@ -395,6 +472,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     maxWidth: '90%',
+  },
+  tipsCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  tipsTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  tipText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 13,
+    marginLeft: 8,
+    flexShrink: 1,
   },
   bottomBar: {
     paddingBottom: 24,

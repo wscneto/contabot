@@ -11,6 +11,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../../context/AuthContext';
 import { api } from '../../../services/api';
 import { Header } from '../../../components/Header';
 import { Input } from '../../../components/Input';
@@ -21,6 +22,7 @@ import { colors, typography } from '../../../constants/theme';
 export default function NewTaskScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { store, user } = useAuth();
   const params = useLocalSearchParams<{ preselectAreaId?: string }>();
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -42,6 +44,29 @@ export default function NewTaskScreen() {
     queryKey: ['manager_team'],
     queryFn: () => api.listTeam(),
   });
+
+  const handleUseDefaultNote = async () => {
+    let defaultNote: string;
+    try {
+      const settings = await queryClient.fetchQuery({
+        queryKey: ['store_settings', store?.id],
+        queryFn: () => api.getStoreSettings(),
+        staleTime: 0,
+      });
+      defaultNote = settings.default_counting_instruction;
+    } catch (error: any) {
+      Alert.alert('Erro ao carregar instrução', error.message);
+      return;
+    }
+    if (note.trim() && note !== defaultNote) {
+      Alert.alert('Substituir instruções?', 'O texto atual será substituído pela orientação padrão de filmagem.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Substituir', onPress: () => setNote(defaultNote) },
+      ]);
+      return;
+    }
+    setNote(defaultNote);
+  };
 
   const handleCreate = async () => {
     if (!selectedAreaId) {
@@ -109,7 +134,7 @@ export default function NewTaskScreen() {
         </Card>
 
         {/* Step 2: Assignee Selection */}
-        <Text style={styles.sectionLabel}>2. Atribuir a um Funcionário (Opcional)</Text>
+        <Text style={styles.sectionLabel}>2. Quem vai contar (Opcional)</Text>
         <Card style={styles.card}>
           <TouchableOpacity
             style={[styles.selectRow, assigneeId === '' && styles.selectRowActive]}
@@ -129,7 +154,8 @@ export default function NewTaskScreen() {
           </TouchableOpacity>
 
           {team
-            .filter((m: any) => m.role === 'employee' && m.active)
+            // O próprio gerente também pode assumir a contagem.
+            .filter((m: any) => m.active && (m.role === 'employee' || m.id === user?.id))
             .map((member: any) => {
               const isSelected = assigneeId === member.id;
               return (
@@ -140,7 +166,7 @@ export default function NewTaskScreen() {
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.selectTitle, isSelected && styles.selectTitleActive]}>
-                      {member.name}
+                      {member.id === user?.id ? `${member.name} (eu)` : member.name}
                     </Text>
                     <Text style={styles.selectSubtitle}>
                       {member.open_tasks} contagens atribuídas
@@ -175,6 +201,12 @@ export default function NewTaskScreen() {
             multiline
             numberOfLines={3}
             leftIcon={<Ionicons name="chatbox-outline" size={20} color={colors.textMuted} />}
+          />
+          <Button
+            title="Usar instrução padrão"
+            onPress={handleUseDefaultNote}
+            variant="outline"
+            size="sm"
           />
         </Card>
 

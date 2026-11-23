@@ -159,7 +159,7 @@ export default function ManagerTasksScreen() {
               <Ionicons name="clipboard-outline" size={48} color={colors.textMuted} />
               <Text style={styles.emptyTitle}>Nenhuma contagem encontrada</Text>
               <Text style={styles.emptySubtitle}>
-                Toque no botão "+" acima para iniciar uma nova contagem para sua equipe.
+                Toque no botão &quot;+&quot; acima para iniciar uma nova contagem para sua equipe.
               </Text>
             </View>
           ) : undefined

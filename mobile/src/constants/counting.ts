@@ -1,0 +1,1 @@
+export const DEFAULT_FILMING_NOTE = 'Filme somente a prateleira desta contagem, com os produtos parados. Comece com uma vista geral de cima e mova o celular devagar, mostrando a frente e as laterais das embalagens. Mantenha boa iluminação, evite reflexos e imagens tremidas. Mostre as unidades do fundo quando estiverem visíveis, sem mudar de prateleira.';
