@@ -48,6 +48,7 @@ jobs:
       - name: Relatório de cobertura
         if: always()
         run: |
+          [ -d coverage-deno ] || exit 0 # testes não chegaram a rodar
           deno coverage coverage-deno --include=supabase/functions/_shared --lcov --output=coverage-deno.lcov
           {
             echo '### Cobertura — supabase/functions/_shared'

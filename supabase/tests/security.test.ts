@@ -23,7 +23,6 @@ import {
   expectDenied,
   expectFriendlyError,
   image,
-  invoke,
   jwtPayload,
   newEmployee,
   newManager,
@@ -31,7 +30,6 @@ import {
   populateStore,
   rpc,
   SUPABASE_URL,
-  tryRpc,
   withToken,
 } from './_helpers.ts';
 
