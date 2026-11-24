@@ -26,6 +26,21 @@ const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
+// Em dados móveis uma requisição pode ficar sem resposta para sempre, e a tela
+// carregava até o app ser reaberto. Com o limite ela falha e a tela pode tentar de novo.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+const fetchWithTimeout: typeof fetch = (input, init) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const callerSignal = init?.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', () => controller.abort());
+  }
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 if (!isSupabaseConfigured) {
   console.warn(
     '[Supabase] Defina EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY em mobile/.env (veja .env.example).',
@@ -40,6 +55,7 @@ export const supabase = createClient(supabaseUrl || 'http://127.0.0.1:54321', su
     persistSession: true,
     detectSessionInUrl: false,
   },
+  global: { fetch: fetchWithTimeout },
 });
 
 // Renova o token só com o app em primeiro plano (recomendação do guia Expo + Supabase).
