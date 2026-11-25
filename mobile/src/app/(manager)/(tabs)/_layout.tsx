@@ -1,9 +1,14 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../../constants/theme';
 
 export default function ManagerTabsLayout() {
+  // Com altura fixa a barra deixa de somar a área segura sozinha; sem isso ela
+  // fica embaixo dos botões de navegação do Android (ex.: Galaxy A06).
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -13,8 +18,8 @@ export default function ManagerTabsLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.surfaceBorder,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + insets.bottom,
+          paddingBottom: 8 + insets.bottom,
           paddingTop: 6,
         },
         tabBarLabelStyle: {

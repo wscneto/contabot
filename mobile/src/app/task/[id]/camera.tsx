@@ -56,6 +56,10 @@ function CameraRecorderContent() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [torch, setTorch] = useState(false);
+  // Gravar antes do onCameraReady devolve na hora um vídeo vazio em aparelhos
+  // mais lentos (ex.: Galaxy A06), e o app pulava direto para a confirmação.
+  const [cameraReady, setCameraReady] = useState(false);
+  const recordingStartedAt = useRef(0);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -96,16 +100,27 @@ function CameraRecorderContent() {
   };
 
   const startRecording = async () => {
-    if (!cameraRef.current || isRecording) return;
+    if (!cameraRef.current || isRecording || !cameraReady) return;
     triggerHaptic();
     setIsRecording(true);
     startTimer();
+    // eslint-disable-next-line react-hooks/purity
+    recordingStartedAt.current = Date.now();
 
     try {
       const videoResult = await cameraRef.current.recordAsync({
         maxDuration: maxDuration,
       });
-      if (videoResult && videoResult.uri) {
+      // eslint-disable-next-line react-hooks/purity
+      const recordedMs = Date.now() - recordingStartedAt.current;
+      if (videoResult?.uri && recordedMs < 1000) {
+        // A gravação terminou sem o usuário filmar: fica na câmera em vez de
+        // seguir para a confirmação com um vídeo vazio.
+        if (Platform.OS !== 'web') {
+          FileSystem.deleteAsync(videoResult.uri, { idempotent: true }).catch(() => null);
+        }
+        Alert.alert('A filmagem não começou', 'Aguarde a câmera abrir e toque no botão de novo.');
+      } else if (videoResult && videoResult.uri) {
         let stableUri = videoResult.uri;
         // No Android/iOS, copia imediatamente para o documentDirectory do app para que
         // o desmonte do CameraView ou a limpeza de cache do SO não apague o arquivo.
@@ -163,6 +178,8 @@ function CameraRecorderContent() {
     if (recordedUri && Platform.OS !== 'web') {
       FileSystem.deleteAsync(recordedUri, { idempotent: true }).catch(() => null);
     }
+    // A câmera é montada de novo e só libera a gravação no próximo onCameraReady.
+    setCameraReady(false);
     setRecordedUri(null);
     setElapsedSeconds(0);
   };
@@ -229,6 +246,7 @@ function CameraRecorderContent() {
             mode="video"
             mute
             enableTorch={torch}
+            onCameraReady={() => setCameraReady(true)}
           />
           {/* CameraView does not support children: keep controls in a native sibling layer. */}
           <View style={styles.controlsOverlay} pointerEvents="box-none" collapsable={false}>
@@ -298,7 +316,12 @@ function CameraRecorderContent() {
                 {/* Shutter Button */}
                 <TouchableOpacity
                   onPress={isRecording ? stopRecording : startRecording}
-                  style={[styles.shutterOuter, isRecording && styles.shutterOuterRecording]}
+                  disabled={!cameraReady && !isRecording}
+                  style={[
+                    styles.shutterOuter,
+                    isRecording && styles.shutterOuterRecording,
+                    !cameraReady && !isRecording && { opacity: 0.4 },
+                  ]}
                   activeOpacity={0.8}
                 >
                   <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
@@ -307,7 +330,11 @@ function CameraRecorderContent() {
                 <View style={{ width: 50 }} />
               </View>
               <Text style={styles.shutterHint}>
-                {isRecording ? 'Toque no quadrado para finalizar' : 'Toque no botão para iniciar filmagem'}
+                {isRecording
+                  ? 'Toque no quadrado para finalizar'
+                  : cameraReady
+                    ? 'Toque no botão para iniciar filmagem'
+                    : 'Preparando a câmera…'}
               </Text>
             </SafeAreaView>
           </View>
