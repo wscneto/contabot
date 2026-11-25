@@ -102,7 +102,8 @@ TaskItem = { product_id, name, variant, photo: string|null,
              final: number|null,                   // aprovado pelo gerente
              previous: number|null }               // última contagem aprovada desta área
 AiMarks  = { frame, width, height, coords: 'xyxy', boxes: [x_min, y_min, x_max, y_max][],   // 0–1000, uma por unidade
-             marked, duplicates_removed }
+             marked, duplicates_removed,
+             discarded: [{ box, iou, same_as }] }   // caixas descartadas como repetidas (same_as = nº da caixa mantida)
 Capture  = { id, status: 'processing'|'done'|'failed', stage: 'frames'|'identifying'|'counting'|null,
              error: string|null, frames: [{id, url, timestamp_seconds}],   // quadros usados na contagem
              unknown_products: string[], simulated: boolean, created_at, by: {id,name} }
@@ -157,7 +158,7 @@ Os limites de aviso continuam heurísticas não calibradas.
 **No servidor** (`supabase/functions/analyze-capture`): faz **identificar → contar** com validação estrita das respostas (`_shared/vision.ts`).
 
 - **Identificar** usa todos os quadros enviados pelo celular quando cabem, junto com as fotos do catálogo, numa única chamada (`identificationFrames`, até `VISION_MAX_IDENTIFY_FRAMES` e `VISION_MAX_IMAGES`). Com um catálogo grande, volta aos 5 quadros de visão geral e divide o catálogo em lotes.
-- **Contar** usa os 5 quadros de visão geral mais os vizinhos das evidências (`selectCountingFrames`, até `VISION_MAX_COUNT_FRAMES`). O modelo não informa um total: escolhe um quadro por SKU e desenha uma caixa por unidade física, em 0–1000. A ordem das coordenadas segue o formato nativo do modelo (`VISION_BOX_FORMAT`): o Gemini escreve `[y_min, x_min, y_max, x_max]` mesmo quando o prompt pede outra ordem, então para ele o prompt pede y primeiro; os demais usam `[x_min, y_min, x_max, y_max]`. O servidor sempre grava x primeiro. O servidor conta as caixas e descarta as repetidas (IoU > 0,5). A quantidade é o número de caixas; frames diferentes nunca são somados. A estimativa por fileiras (frentes × profundidade), introduzida no #26, foi retirada. Cobertura incompleta mantém a contagem visível, mas pede conferência; zero só vale com a área inteira visível.
+- **Contar** usa os 5 quadros de visão geral mais os vizinhos das evidências (`selectCountingFrames`, até `VISION_MAX_COUNT_FRAMES`). O modelo não informa um total: escolhe um quadro por SKU e desenha uma caixa por unidade física, em 0–1000. A ordem das coordenadas segue o formato nativo do modelo (`VISION_BOX_FORMAT`): o Gemini escreve `[y_min, x_min, y_max, x_max]` mesmo quando o prompt pede outra ordem, então para ele o prompt pede y primeiro; os demais usam `[x_min, y_min, x_max, y_max]`. O servidor sempre grava x primeiro. O servidor conta as caixas e descarta as repetidas: caixas com IoU acima de `VISION_DUPLICATE_IOU` (padrão 0,8). O limite era 0,5, mas unidades vizinhas numa fileira vista em perspectiva chegam a esse valor e eram descartadas (contagem real: 8 unidades viraram 6). Toda caixa descartada fica em `ai_marks.discarded`, com o IoU e a caixa que repetiria, e o item vai para *conferir*. A quantidade é o número de caixas; frames diferentes nunca são somados. A estimativa por fileiras (frentes × profundidade), introduzida no #26, foi retirada. Cobertura incompleta mantém a contagem visível, mas pede conferência; zero só vale com a área inteira visível.
  Cada etapa roda numa invocação própria, em segundo plano, para caber no limite de tempo das Edge Functions. `pipeline_claim` impede análise duplicada. O provedor é qualquer API compatível com OpenAI Chat Completions, configurada por `VISION_*`, ou `mock`.
 
 ## Instrução padrão de contagem por loja

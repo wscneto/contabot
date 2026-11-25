@@ -209,6 +209,11 @@ Deno.test('propriedade: contagem que respeita o contrato é aceita e consolidada
         assertEquals(marks.frame_id, raw.count_frame_id);
         assertEquals(marks.marked, marks.boxes.length);
         assertEquals(marks.marked + marks.duplicates_removed, raw.boxes.length);
+        assertEquals(marks.discarded.length, marks.duplicates_removed);
+        for (const d of marks.discarded) {
+          assert(d.iou > 0.8 && d.same_as >= 1 && d.same_as <= marks.marked, JSON.stringify(d));
+        }
+        if (marks.duplicates_removed > 0) assert(count.needs_review, 'descarte pede conferência');
         assert(marks.boxes.length <= raw.boxes.length);
         // A quantidade é o número de caixas de UM frame, nunca a soma de frames.
         assertEquals(count.quantity, marks.marked);

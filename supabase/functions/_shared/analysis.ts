@@ -4,7 +4,7 @@
  */
 
 import { type FrameCandidate, selectCountingFrames } from './frame-selection.ts';
-import type { Box, CountResult, Identification, SkuMatch } from './vision.ts';
+import type { Box, CountResult, DiscardedBox, Identification, SkuMatch } from './vision.ts';
 import { ProviderError } from './vision.ts';
 
 /** Quadro enviado pelo celular (captures.frames). */
@@ -34,6 +34,8 @@ export interface ItemMarks {
   boxes: Box[];
   marked: number;
   duplicates_removed: number;
+  /** Caixas descartadas como repetidas, com o IoU e a caixa mantida que repetiriam. */
+  discarded: DiscardedBox[];
 }
 
 export interface ItemUpdate {
@@ -197,7 +199,8 @@ function plural(n: number, singular: string, pluralForm: string): string {
 export function marksSummary(marks: ItemMarks): string {
   const marked = plural(marks.marked, 'unidade marcada', 'unidades marcadas');
   const repeated = marks.duplicates_removed
-    ? ` (${plural(marks.duplicates_removed, 'marcação repetida descartada', 'marcações repetidas descartadas')})`
+    ? ` (${plural(marks.duplicates_removed, 'marcação descartada', 'marcações descartadas')} por quase coincidir ` +
+      `com outra; confira se não ${marks.duplicates_removed === 1 ? 'era uma unidade' : 'eram unidades'} a mais)`
     : '';
   return `${marked} na imagem${repeated}.`;
 }
@@ -242,6 +245,7 @@ export function countItems(
         boxes: marks.boxes,
         marked: marks.marked,
         duplicates_removed: marks.duplicates_removed,
+        discarded: marks.discarded,
       }
       : null;
     const summary = aiMarks && count.quantity !== null ? marksSummary(aiMarks) : '';

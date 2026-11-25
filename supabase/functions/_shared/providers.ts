@@ -11,6 +11,7 @@ import {
   type BoxFormat,
   boxFormatFor,
   type CountResult,
+  DEFAULT_DUPLICATE_IOU,
   type Identification,
   ProviderError,
   type RawCountResult,
@@ -138,6 +139,8 @@ export interface ChatProviderOptions {
   imageDetail?: string;
   /** Ordem das coordenadas das caixas; padrão pelo nome do modelo (Gemini = yxyx). */
   boxFormat?: BoxFormat;
+  /** IoU acima do qual duas caixas são a mesma unidade (VISION_DUPLICATE_IOU). */
+  duplicateIou?: number;
   extraParameters?: Record<string, unknown>;
   fetchImpl?: typeof fetch;
 }
@@ -199,6 +202,7 @@ export class ChatCompletionsProvider implements VisionProvider {
       responseFormat: options.responseFormat ?? 'json_schema',
       imageDetail: options.imageDetail ?? 'high',
       boxFormat: options.boxFormat ?? boxFormatFor(this.model),
+      duplicateIou: options.duplicateIou ?? DEFAULT_DUPLICATE_IOU,
       extraParameters: extra,
       fetchImpl: options.fetchImpl ?? fetch,
     };
@@ -370,6 +374,7 @@ export class ChatCompletionsProvider implements VisionProvider {
           usage,
           requestId,
           boxFormat: this.options.boxFormat,
+          duplicateIou: this.options.duplicateIou,
         });
         return {
           prediction,
@@ -527,6 +532,7 @@ function positiveInt(env: (name: string) => string | undefined, name: string, fa
  *   VISION_MAX_IMAGES (32)  VISION_MAX_IDENTIFY_FRAMES (20)  VISION_MAX_COUNT_FRAMES (10)
  *   VISION_IMAGE_DETAIL (high)  VISION_EXTRA_PARAMS (objeto JSON)
  *   VISION_BOX_FORMAT        xyxy | yxyx (padrão: yxyx para Gemini, xyxy para os demais)
+ *   VISION_DUPLICATE_IOU     0,5 a 0,99 (0.8): sobreposição a partir da qual caixas são a mesma unidade
  *   VISION_MOCK_DELAY_MS (1500)
  */
 export function visionSettingsFromEnv(env: (name: string) => string | undefined): VisionSettings {
@@ -554,6 +560,11 @@ export function visionSettingsFromEnv(env: (name: string) => string | undefined)
       throw new ProviderError('VISION_EXTRA_PARAMS deve ser um objeto JSON.');
     }
   }
+  const duplicateIouRaw = env('VISION_DUPLICATE_IOU')?.trim();
+  const duplicateIou = duplicateIouRaw ? Number(duplicateIouRaw.replace(',', '.')) : DEFAULT_DUPLICATE_IOU;
+  if (!(duplicateIou >= 0.5 && duplicateIou < 1)) {
+    throw new ProviderError('VISION_DUPLICATE_IOU deve ser um número entre 0.5 e 0.99.');
+  }
   const boxFormatOverride = env('VISION_BOX_FORMAT')?.trim().toLowerCase() || undefined;
   if (boxFormatOverride && boxFormatOverride !== 'xyxy' && boxFormatOverride !== 'yxyx') {
     throw new ProviderError('VISION_BOX_FORMAT deve ser xyxy ou yxyx.');
@@ -573,6 +584,7 @@ export function visionSettingsFromEnv(env: (name: string) => string | undefined)
     responseFormat,
     imageDetail: env('VISION_IMAGE_DETAIL') || 'high',
     boxFormat: boxFormatFor(env('VISION_MODEL') ?? '', boxFormatOverride),
+    duplicateIou,
     extraParameters,
   });
   return { provider, maxImages, maxIdentifyFrames, maxCountFrames };

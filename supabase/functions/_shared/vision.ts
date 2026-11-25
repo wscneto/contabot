@@ -56,12 +56,22 @@ export interface RawCountResult {
 }
 
 /** Como o servidor chegou à quantidade (mostrado na conferência). */
+/** Caixa descartada como marcação repetida, para auditoria. */
+export interface DiscardedBox {
+  box: Box;
+  /** IoU com a caixa mantida que ela repetiria. */
+  iou: number;
+  /** Número (1, 2, …) da caixa mantida que ela repetiria, como aparece na conferência. */
+  same_as: number;
+}
+
 export interface CountMarks {
   frame_id: string;
   /** Caixas que sobraram após remover marcações repetidas. */
   boxes: Box[];
   marked: number;
   duplicates_removed: number;
+  discarded: DiscardedBox[];
 }
 
 /** Contagem consolidada pelo servidor a partir das marcações do modelo. */
@@ -285,13 +295,46 @@ export function iou(a: Box, b: Box): number {
   return union > 0 ? inter / union : 0;
 }
 
-/** Remove marcações repetidas da mesma unidade (IoU acima do limite), mantendo a primeira. */
-export function dedupeBoxes(boxes: Box[], threshold = 0.5): Box[] {
+/**
+ * IoU acima do qual duas caixas são a mesma unidade. Marcações repetidas de verdade
+ * são quase a mesma caixa (IoU ~0,9); unidades vizinhas numa fileira vista em
+ * perspectiva, da frente para o fundo, chegam a ~0,5 (contagem real do Crocantinho:
+ * 8 unidades, 0,5 descartou 2). Configurável por VISION_DUPLICATE_IOU.
+ */
+export const DEFAULT_DUPLICATE_IOU = 0.8;
+
+/**
+ * Separa marcações repetidas da mesma unidade (IoU acima do limite com uma caixa
+ * já mantida), mantendo a primeira e registrando cada descarte.
+ */
+export function dedupeWithReport(
+  boxes: Box[],
+  threshold = DEFAULT_DUPLICATE_IOU,
+): { kept: Box[]; discarded: DiscardedBox[] } {
   const kept: Box[] = [];
+  const discarded: DiscardedBox[] = [];
   for (const box of boxes) {
-    if (!kept.some((other) => iou(box, other) > threshold)) kept.push(box);
+    let best = -1;
+    let bestIou = 0;
+    kept.forEach((other, index) => {
+      const value = iou(box, other);
+      if (value > bestIou) {
+        bestIou = value;
+        best = index;
+      }
+    });
+    if (best >= 0 && bestIou > threshold) {
+      discarded.push({ box, iou: Math.round(bestIou * 1000) / 1000, same_as: best + 1 });
+    } else {
+      kept.push(box);
+    }
   }
-  return kept;
+  return { kept, discarded };
+}
+
+/** Remove marcações repetidas da mesma unidade (IoU acima do limite), mantendo a primeira. */
+export function dedupeBoxes(boxes: Box[], threshold = DEFAULT_DUPLICATE_IOU): Box[] {
+  return dedupeWithReport(boxes, threshold).kept;
 }
 
 const NO_FRAME_REASON = 'Nenhum frame permite distinguir as unidades deste produto.';
@@ -299,21 +342,29 @@ const REVIEW_REASON = 'Confira a quantidade na prateleira.';
 
 /**
  * Converte as marcações do modelo numa quantidade: o número de caixas (sem
- * duplicadas) do único frame de contagem. Nunca soma frames diferentes.
+ * duplicadas) do único frame de contagem. Nunca soma frames diferentes. Se
+ * alguma caixa for descartada como repetida, pede conferência: pode ter sido
+ * uma unidade real muito sobreposta à vizinha.
  */
-export function consolidateCount(raw: RawSkuCount, coverageComplete: boolean, overlapResolved: boolean): SkuCount {
+export function consolidateCount(
+  raw: RawSkuCount,
+  coverageComplete: boolean,
+  overlapResolved: boolean,
+  duplicateIou = DEFAULT_DUPLICATE_IOU,
+): SkuCount {
   const partial = !coverageComplete || !overlapResolved;
   let quantity: number | null = null;
   let marks: CountMarks | null = null;
 
   if (raw.count_frame_id !== null) {
-    const boxes = dedupeBoxes(raw.boxes);
-    quantity = boxes.length;
+    const { kept, discarded } = dedupeWithReport(raw.boxes, duplicateIou);
+    quantity = kept.length;
     marks = {
       frame_id: raw.count_frame_id,
-      boxes,
-      marked: boxes.length,
-      duplicates_removed: raw.boxes.length - boxes.length,
+      boxes: kept,
+      marked: kept.length,
+      duplicates_removed: discarded.length,
+      discarded,
     };
     // Sem visão da área inteira, nenhuma caixa marcada não comprova estoque zero.
     if (quantity === 0 && (partial || raw.incomplete)) {
@@ -323,7 +374,7 @@ export function consolidateCount(raw: RawSkuCount, coverageComplete: boolean, ov
   }
 
   const incomplete = raw.incomplete || partial || quantity === null;
-  const needsReview = raw.needs_review || incomplete;
+  const needsReview = raw.needs_review || incomplete || (marks?.duplicates_removed ?? 0) > 0;
   const reason = raw.reason.trim() || (quantity === null ? NO_FRAME_REASON : needsReview ? REVIEW_REASON : '');
   const evidence = marks === null ? [] : [marks.frame_id];
   return {
@@ -423,13 +474,14 @@ export function parseCountResult(
   skuIds: string[],
   frameIds: string[],
   boxFormat: BoxFormat = 'xyxy',
+  duplicateIou = DEFAULT_DUPLICATE_IOU,
 ): CountResult {
   const raw = parseRawCountResult(payload, videoId, skuIds, frameIds, boxFormat);
   return {
     video_id: raw.video_id,
     coverage_complete: raw.coverage_complete,
     overlap_resolved: raw.overlap_resolved,
-    counts: raw.counts.map((c) => consolidateCount(c, raw.coverage_complete, raw.overlap_resolved)),
+    counts: raw.counts.map((c) => consolidateCount(c, raw.coverage_complete, raw.overlap_resolved, duplicateIou)),
     unknown_products: raw.unknown_products,
   };
 }
@@ -450,13 +502,18 @@ export function validateStage(
   videoId: string,
   skuIds: string[],
   frameIds: string[],
-  opts: { usage?: Record<string, unknown>; requestId?: string | null; boxFormat?: BoxFormat } = {},
+  opts: {
+    usage?: Record<string, unknown>;
+    requestId?: string | null;
+    boxFormat?: BoxFormat;
+    duplicateIou?: number;
+  } = {},
 ): Identification | CountResult {
-  const { boxFormat = 'xyxy', ...errorOpts } = opts;
+  const { boxFormat = 'xyxy', duplicateIou = DEFAULT_DUPLICATE_IOU, ...errorOpts } = opts;
   try {
     return stage === 'identify'
       ? parseIdentification(payload, videoId, skuIds, frameIds)
-      : parseCountResult(payload, videoId, skuIds, frameIds, boxFormat);
+      : parseCountResult(payload, videoId, skuIds, frameIds, boxFormat, duplicateIou);
   } catch (error) {
     if (error instanceof SchemaError) {
       // Só no log do servidor: qual regra falhou e o início da resposta, para
