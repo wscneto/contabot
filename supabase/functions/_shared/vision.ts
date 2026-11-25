@@ -240,20 +240,41 @@ export const MAX_BOXES_PER_SKU = 300;
 const MAX_LAYOUT_QUANTITY = 1000;
 
 /**
- * Caixa [x_min, y_min, x_max, y_max] em 0–1000. Números fora da faixa são
- * limitados e cantos invertidos são trocados: só a quantidade de caixas
- * importa para a contagem, e o desenho na conferência continua coerente.
+ * Ordem das coordenadas que o modelo escreve. Gemini é treinado com
+ * [y_min, x_min, y_max, x_max] e mantém essa ordem mesmo quando o prompt pede
+ * outra; Qwen-VL, GPT e a maioria usam [x_min, y_min, x_max, y_max]. Por isso o
+ * prompt pede o formato nativo do modelo e o servidor converte para xyxy.
  */
-function parseBox(value: unknown, where: string): Box {
-  if (!Array.isArray(value) || value.length !== 4) throw new SchemaError(`${where}: esperado [x_min, y_min, x_max, y_max].`);
+export type BoxFormat = 'xyxy' | 'yxyx';
+
+export const BOX_FORMAT_LABEL: Record<BoxFormat, string> = {
+  xyxy: '[x_min, y_min, x_max, y_max]',
+  yxyx: '[y_min, x_min, y_max, x_max]',
+};
+
+/** Formato nativo pelo nome do modelo; VISION_BOX_FORMAT sobrepõe. */
+export function boxFormatFor(model: string, override?: string): BoxFormat {
+  const forced = override?.trim().toLowerCase();
+  if (forced === 'xyxy' || forced === 'yxyx') return forced;
+  return /gemini/i.test(model) ? 'yxyx' : 'xyxy';
+}
+
+/**
+ * Caixa no formato do modelo, em 0–1000, convertida para [x_min, y_min, x_max, y_max].
+ * Números fora da faixa são limitados e cantos invertidos são trocados: só a
+ * quantidade de caixas importa para a contagem, e o desenho continua coerente.
+ */
+function parseBox(value: unknown, where: string, format: BoxFormat): Box {
+  if (!Array.isArray(value) || value.length !== 4) throw new SchemaError(`${where}: esperado ${BOX_FORMAT_LABEL[format]}.`);
   const n = value.map((v, k) => {
     if (typeof v !== 'number' || !Number.isFinite(v)) throw new SchemaError(`${where}[${k}]: esperado número.`);
     return Math.round(Math.max(0, Math.min(1000, v)));
   });
-  return [Math.min(n[0], n[2]), Math.min(n[1], n[3]), Math.max(n[0], n[2]), Math.max(n[1], n[3])];
+  const [x0, y0, x1, y1] = format === 'yxyx' ? [n[1], n[0], n[3], n[2]] : n;
+  return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
 }
 
-function parseRawCount(value: unknown, i: number): RawSkuCount {
+function parseRawCount(value: unknown, i: number, format: BoxFormat): RawSkuCount {
   const where = `counts[${i}]`;
   const o = exactObject(
     value,
@@ -265,7 +286,7 @@ function parseRawCount(value: unknown, i: number): RawSkuCount {
   const row: RawSkuCount = {
     sku_id: str(o.sku_id, `${where}.sku_id`),
     count_frame_id: nullableStr(o.count_frame_id, `${where}.count_frame_id`),
-    boxes: boxes.map((b, k) => parseBox(b, `${where}.boxes[${k}]`)),
+    boxes: boxes.map((b, k) => parseBox(b, `${where}.boxes[${k}]`, format)),
     facings: positiveIntOrNull(o.facings, `${where}.facings`),
     depth: positiveIntOrNull(o.depth, `${where}.depth`),
     depth_frame_id: nullableStr(o.depth_frame_id, `${where}.depth_frame_id`),
@@ -408,6 +429,7 @@ export function parseRawCountResult(
   videoId: string,
   skuIds: string[],
   frameIds: string[],
+  boxFormat: BoxFormat = 'xyxy',
 ): RawCountResult {
   const o = exactObject(
     payload,
@@ -418,7 +440,7 @@ export function parseRawCountResult(
     video_id: str(o.video_id, 'video_id'),
     coverage_complete: bool(o.coverage_complete, 'coverage_complete'),
     overlap_resolved: bool(o.overlap_resolved, 'overlap_resolved'),
-    counts: list(o.counts, 'counts').map(parseRawCount),
+    counts: list(o.counts, 'counts').map((c, i) => parseRawCount(c, i, boxFormat)),
     unknown_products: strList(o.unknown_products, 'unknown_products'),
   };
   // Produtos fora do catálogo (ex.: outros itens na mesma prateleira) são comuns
@@ -442,8 +464,9 @@ export function parseCountResult(
   videoId: string,
   skuIds: string[],
   frameIds: string[],
+  boxFormat: BoxFormat = 'xyxy',
 ): CountResult {
-  const raw = parseRawCountResult(payload, videoId, skuIds, frameIds);
+  const raw = parseRawCountResult(payload, videoId, skuIds, frameIds, boxFormat);
   return {
     video_id: raw.video_id,
     coverage_complete: raw.coverage_complete,
@@ -469,12 +492,13 @@ export function validateStage(
   videoId: string,
   skuIds: string[],
   frameIds: string[],
-  opts: { usage?: Record<string, unknown>; requestId?: string | null } = {},
+  opts: { usage?: Record<string, unknown>; requestId?: string | null; boxFormat?: BoxFormat } = {},
 ): Identification | CountResult {
+  const { boxFormat = 'xyxy', ...errorOpts } = opts;
   try {
     return stage === 'identify'
       ? parseIdentification(payload, videoId, skuIds, frameIds)
-      : parseCountResult(payload, videoId, skuIds, frameIds);
+      : parseCountResult(payload, videoId, skuIds, frameIds, boxFormat);
   } catch (error) {
     if (error instanceof SchemaError) {
       // Só no log do servidor: qual regra falhou e o início da resposta, para
@@ -482,7 +506,7 @@ export function validateStage(
       console.error(`[${stage}] resposta rejeitada: ${error.message}`, preview(payload));
       throw new ProviderError(
         'A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.',
-        { ...opts, cause: error },
+        { ...errorOpts, cause: error },
       );
     }
     throw error;
