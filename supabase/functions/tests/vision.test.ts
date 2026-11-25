@@ -2,6 +2,7 @@ import { assert, assertEquals, assertRejects, assertThrows } from 'jsr:@std/asse
 import {
   boxFormatFor,
   dedupeBoxes,
+  dedupeWithReport,
   iou,
   parseCountResult,
   parseIdentification,
@@ -55,6 +56,48 @@ Deno.test('marcações repetidas da mesma unidade são descartadas', () => {
   assertEquals(dedupeBoxes([[0, 0, 100, 100], [100, 0, 200, 100], [50, 0, 150, 100]]).length, 3);
   assertEquals(iou([0, 0, 10, 10], [0, 0, 10, 10]), 1);
   assertEquals(iou([0, 0, 0, 0], [0, 0, 0, 0]), 1);
+});
+
+// Contagem real (Crocantinho, Mercadinho Walter): fileira de 8 unidades da frente para o fundo,
+// em perspectiva. As 6 caixas que o servidor manteve com o limite antigo (0,5) e 2 intermediárias.
+const perspectiveRow: Json[] = [
+  [0, 495, 365, 930],
+  [28, 476, 428, 883],
+  [57, 457, 492, 836],
+  [155, 411, 577, 686],
+  [244, 372, 651, 670],
+  [334, 333, 725, 655],
+  [482, 280, 838, 608],
+  [528, 255, 881, 431],
+];
+
+Deno.test('unidades vizinhas numa fileira em perspectiva não são descartadas como repetidas', () => {
+  const count = validate(suggestion(perspectiveRow)).counts[0];
+  assertEquals(count.quantity, 8);
+  assertEquals(count.marks?.duplicates_removed, 0);
+  assertEquals(count.needs_review, false);
+  // O limite antigo (0,5) reproduz o erro de produção: 8 → 6.
+  const old = dedupeWithReport(perspectiveRow, 0.5);
+  assertEquals(old.kept.length, 6);
+  assertEquals(old.discarded.map((d) => [d.iou, d.same_as]), [[0.685, 1], [0.571, 3]]);
+});
+
+Deno.test('caixa descartada fica registrada com IoU e a caixa repetida, e pede conferência', () => {
+  const count = validate(suggestion([[0, 0, 100, 100], [300, 0, 400, 100], [302, 1, 401, 99]])).counts[0];
+  assertEquals(count.quantity, 2);
+  assertEquals(count.marks?.discarded, [{ box: [302, 1, 401, 99], iou: 0.951, same_as: 2 }]);
+  assertEquals([count.incomplete, count.needs_review], [false, true]);
+  assert(count.reason.length > 0);
+  // Limite configurável: 0,96 mantém as três.
+  const strict = parseCountResult(
+    suggestion([[0, 0, 100, 100], [300, 0, 400, 100], [302, 1, 401, 99]]),
+    'video-1',
+    ['sku-a'],
+    ['frame-1', 'frame-2'],
+    'xyxy',
+    0.96,
+  );
+  assertEquals(strict.counts[0].quantity, 3);
 });
 
 Deno.test('caixas fora da faixa ou invertidas são normalizadas; formatos inválidos falham', () => {
@@ -407,6 +450,10 @@ Deno.test('configuração por ambiente: chat é o padrão e mock é explícito',
   };
   visionSettingsFromEnv(env({ ...chatEnv, VISION_BOX_FORMAT: 'yxyx' }));
   assertThrows(() => visionSettingsFromEnv(env({ ...chatEnv, VISION_BOX_FORMAT: 'xy' })), ProviderError, 'VISION_BOX_FORMAT');
+  visionSettingsFromEnv(env({ ...chatEnv, VISION_DUPLICATE_IOU: '0,9' }));
+  for (const bad of ['0.3', '1', 'abc']) {
+    assertThrows(() => visionSettingsFromEnv(env({ ...chatEnv, VISION_DUPLICATE_IOU: bad })), ProviderError, 'VISION_DUPLICATE_IOU');
+  }
 });
 
 Deno.test('mock é determinístico nas duas etapas', async () => {
@@ -515,6 +562,20 @@ Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fic
   assertEquals(items[2].ai_marks, null);
   assertEquals(items[3].ai_note, 'motivo d');
   assertEquals(items[1].ai_note, '2 unidades marcadas na imagem. confira');
+  assertEquals(items[0].ai_marks?.discarded, []);
+  const repeated = countItems(skus, identification, parseCountResult({
+    video_id: 'cap',
+    coverage_complete: true,
+    overlap_resolved: true,
+    unknown_products: [],
+    counts: [row('a', [box(0), box(1), [101, 1, 189, 99]], { reason: 'nítido' })],
+  }, 'cap', ['a'], ['f0001', 'f0002']), frames)[0];
+  assertEquals([repeated.ai_status, repeated.counted], ['check', 2]);
+  assertEquals(repeated.ai_marks?.discarded.map((d) => d.same_as), [2]);
+  assertEquals(
+    repeated.ai_note,
+    '2 unidades marcadas na imagem (1 marcação descartada por quase coincidir com outra; confira se não era uma unidade a mais). nítido',
+  );
   assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing' && i.ai_marks === null), true);
 });
 
