@@ -6,7 +6,16 @@
  */
 
 import { COUNTING_INSTRUCTIONS, IDENTIFICATION_INSTRUCTIONS } from './prompts.ts';
-import { type CountResult, type Identification, ProviderError, SCHEMAS, type Stage, validateStage } from './vision.ts';
+import {
+  type Box,
+  type CountResult,
+  type Identification,
+  ProviderError,
+  type RawCountResult,
+  SCHEMAS,
+  type Stage,
+  validateStage,
+} from './vision.ts';
 
 export interface VisionImage {
   /** data:<mime>;base64,<...> */
@@ -129,6 +138,14 @@ export interface ChatProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** Quadros + fotos de referência por chamada (Gemini, Qwen-VL e GPT aceitam bem mais). */
+export const DEFAULT_MAX_IMAGES = 32;
+/** Quadros do vídeo na identificação (o celular envia até 20). */
+export const DEFAULT_MAX_IDENTIFY_FRAMES = 20;
+export const DEFAULT_MAX_COUNT_FRAMES = 10;
+/** As marcações (uma caixa por unidade) ocupam mais saída que um total. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8000;
+
 const PROTECTED_PARAMETERS = new Set([
   'model',
   'messages',
@@ -166,14 +183,14 @@ export class ChatCompletionsProvider implements VisionProvider {
       throw new ProviderError('Parâmetros extras não podem substituir imagens, modelo, esquema ou controles da requisição.');
     }
     this.model = options.model.trim();
-    this.maxImages = options.maxImages ?? 16;
+    this.maxImages = options.maxImages ?? DEFAULT_MAX_IMAGES;
     this.options = {
       endpoint: options.endpoint,
       model: this.model,
       apiKey: options.apiKey ?? '',
       maxImages: this.maxImages,
       timeoutMs: options.timeoutMs ?? 120_000,
-      maxOutputTokens: options.maxOutputTokens ?? 4000,
+      maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       tokenLimitParam: options.tokenLimitParam ?? 'max_tokens',
       responseFormat: options.responseFormat ?? 'json_schema',
       imageDetail: options.imageDetail ?? 'high',
@@ -219,11 +236,14 @@ export class ChatCompletionsProvider implements VisionProvider {
         overlap_resolved: true,
         counts: [{
           sku_id: sampleSkuId,
-          quantity: 1,
+          count_frame_id: video.primary_frame_id,
+          boxes: [[120, 300, 260, 620], [270, 305, 410, 625]],
+          facings: null,
+          depth: null,
+          depth_frame_id: null,
           incomplete: false,
           needs_review: false,
-          reason: 'Descrição objetiva da contagem consolidada.',
-          evidence_frame_ids: [video.primary_frame_id],
+          reason: 'Duas unidades marcadas lado a lado na fileira frontal.',
         }],
         unknown_products: [],
       };
@@ -432,24 +452,39 @@ export class MockProvider implements VisionProvider {
   async count(video: VisionVideo, catalog: VisionSku[], frames: VisionFrame[]) {
     await this.wait();
     prepare(video, catalog, frames, this.maxImages);
-    const prediction: CountResult = {
+    const raw: RawCountResult = {
       video_id: video.id,
       coverage_complete: true,
       overlap_resolved: true,
       unknown_products: [],
       counts: catalog.map((sku, index) => ({
         sku_id: sku.id,
-        quantity: index + 3,
+        count_frame_id: video.primary_frame_id,
+        boxes: mockBoxes(index, index + 3),
+        facings: null,
+        depth: null,
+        depth_frame_id: null,
         incomplete: false,
         needs_review: index % 2 === 1,
         reason: index % 2 === 1
           ? 'SIMULAÇÃO: confira, parte das caixas pode estar encoberta.'
           : 'SIMULAÇÃO: contagem nítida de todas as unidades.',
-        evidence_frame_ids: [video.primary_frame_id],
       })),
     };
+    const prediction = validateStage('count', raw, video.id, catalog.map((s) => s.id), frames.map((f) => f.id)) as
+      CountResult;
     return { prediction, usage: {}, model: this.model, simulated: true, requestId: null };
   }
+}
+
+/** Caixas em grade, uma fileira por SKU, só para a demonstração desenhar algo plausível. */
+function mockBoxes(row: number, count: number): Box[] {
+  const top = 80 + (row % 4) * 220;
+  const width = Math.floor(900 / Math.max(count, 1));
+  return Array.from({ length: count }, (_, i) => {
+    const left = 50 + i * width;
+    return [left + 8, top, left + width - 8, top + 180] as Box;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +494,7 @@ export class MockProvider implements VisionProvider {
 export interface VisionSettings {
   provider: VisionProvider;
   maxImages: number;
+  maxIdentifyFrames: number;
   maxCountFrames: number;
 }
 
@@ -478,20 +514,21 @@ function positiveInt(env: (name: string) => string | undefined, name: string, fa
  *   VISION_API_KEY          chave do provedor
  *   VISION_RESPONSE_FORMAT  json_schema (padrão) | json_object | none
  *   VISION_TOKEN_LIMIT_PARAM max_tokens (padrão) | max_completion_tokens
- *   VISION_MAX_OUTPUT_TOKENS (4000)  VISION_TIMEOUT_SECONDS (120)
- *   VISION_MAX_IMAGES (16)  VISION_MAX_COUNT_FRAMES (10)
+ *   VISION_MAX_OUTPUT_TOKENS (8000)  VISION_TIMEOUT_SECONDS (120)
+ *   VISION_MAX_IMAGES (32)  VISION_MAX_IDENTIFY_FRAMES (20)  VISION_MAX_COUNT_FRAMES (10)
  *   VISION_IMAGE_DETAIL (high)  VISION_EXTRA_PARAMS (objeto JSON)
  *   VISION_MOCK_DELAY_MS (1500)
  */
 export function visionSettingsFromEnv(env: (name: string) => string | undefined): VisionSettings {
   const kind = (env('VISION_PROVIDER') || 'chat').trim().toLowerCase();
-  const maxImages = positiveInt(env, 'VISION_MAX_IMAGES', 16);
-  const maxCountFrames = positiveInt(env, 'VISION_MAX_COUNT_FRAMES', 10);
+  const maxImages = positiveInt(env, 'VISION_MAX_IMAGES', DEFAULT_MAX_IMAGES);
+  const maxIdentifyFrames = positiveInt(env, 'VISION_MAX_IDENTIFY_FRAMES', DEFAULT_MAX_IDENTIFY_FRAMES);
+  const maxCountFrames = positiveInt(env, 'VISION_MAX_COUNT_FRAMES', DEFAULT_MAX_COUNT_FRAMES);
   if (maxImages < 2) throw new ProviderError('VISION_MAX_IMAGES deve reservar imagens para vídeo e referências.');
 
   if (kind === 'mock') {
     const delay = Number(env('VISION_MOCK_DELAY_MS') ?? 1500);
-    return { provider: new MockProvider(Number.isFinite(delay) ? delay : 0), maxImages, maxCountFrames };
+    return { provider: new MockProvider(Number.isFinite(delay) ? delay : 0), maxImages, maxIdentifyFrames, maxCountFrames };
   }
   if (kind !== 'chat') throw new ProviderError('VISION_PROVIDER deve ser chat ou mock.');
 
@@ -517,11 +554,11 @@ export function visionSettingsFromEnv(env: (name: string) => string | undefined)
     apiKey: env('VISION_API_KEY') ?? '',
     maxImages,
     timeoutMs: positiveInt(env, 'VISION_TIMEOUT_SECONDS', 120) * 1000,
-    maxOutputTokens: positiveInt(env, 'VISION_MAX_OUTPUT_TOKENS', 4000),
+    maxOutputTokens: positiveInt(env, 'VISION_MAX_OUTPUT_TOKENS', DEFAULT_MAX_OUTPUT_TOKENS),
     tokenLimitParam: env('VISION_TOKEN_LIMIT_PARAM') || 'max_tokens',
     responseFormat,
     imageDetail: env('VISION_IMAGE_DETAIL') || 'high',
     extraParameters,
   });
-  return { provider, maxImages, maxCountFrames };
+  return { provider, maxImages, maxIdentifyFrames, maxCountFrames };
 }

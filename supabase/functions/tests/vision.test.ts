@@ -1,81 +1,160 @@
 import { assert, assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1';
-import { parseCountResult, parseIdentification, ProviderError, validateStage } from '../_shared/vision.ts';
+import {
+  dedupeBoxes,
+  iou,
+  parseCountResult,
+  parseIdentification,
+  ProviderError,
+  validateStage,
+} from '../_shared/vision.ts';
 import { ChatCompletionsProvider, MockProvider, parseModelJson, visionSettingsFromEnv } from '../_shared/providers.ts';
-import { countItems, countingFrames, identificationBatches, noMatchItems } from '../_shared/analysis.ts';
+import {
+  countItems,
+  countingFrames,
+  identificationBatches,
+  identificationFrames,
+  noMatchItems,
+  overviewFrames,
+} from '../_shared/analysis.ts';
 import type { StoredFrame } from '../_shared/analysis.ts';
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
-const suggestion = (quantity: unknown = 3): Json => ({
+/** Resposta da contagem como o modelo devolve: caixas, não um total. */
+const suggestion = (boxes: Json[] = [[0, 0, 100, 100], [200, 0, 300, 100], [400, 0, 500, 100]]): Json => ({
   video_id: 'video-1',
   coverage_complete: true,
   overlap_resolved: true,
   unknown_products: [],
   counts: [{
     sku_id: 'sku-a',
-    quantity,
+    count_frame_id: 'frame-1',
+    boxes,
+    facings: null,
+    depth: null,
+    depth_frame_id: null,
     incomplete: false,
     needs_review: false,
     reason: '',
-    evidence_frame_ids: ['frame-1', 'frame-2'],
   }],
 });
 const validate = (payload: Json) => parseCountResult(payload, 'video-1', ['sku-a'], ['frame-1', 'frame-2']);
 
-Deno.test('quantidade exige inteiro não negativo estrito', () => {
-  for (const q of [-1, 1.5, '3', true, false]) assertThrows(() => validate(suggestion(q)));
-  assertEquals(validate(suggestion(3)).counts[0].quantity, 3);
+Deno.test('o servidor conta as caixas marcadas no frame de contagem', () => {
+  const count = validate(suggestion()).counts[0];
+  assertEquals(count.quantity, 3);
+  assertEquals(count.evidence_frame_ids, ['frame-1']);
+  assertEquals(count.marks?.method, 'marked');
+  assertEquals(count.marks?.marked, 3);
+  assertEquals([count.incomplete, count.needs_review], [false, false]);
+});
+
+Deno.test('marcações repetidas da mesma unidade são descartadas', () => {
+  const count = validate(suggestion([[0, 0, 100, 100], [5, 5, 102, 98], [300, 0, 400, 100]])).counts[0];
+  assertEquals(count.quantity, 2);
+  assertEquals(count.marks?.duplicates_removed, 1);
+  // Unidades vizinhas encostadas não são duplicatas.
+  assertEquals(dedupeBoxes([[0, 0, 100, 100], [100, 0, 200, 100], [50, 0, 150, 100]]).length, 3);
+  assertEquals(iou([0, 0, 10, 10], [0, 0, 10, 10]), 1);
+  assertEquals(iou([0, 0, 0, 0], [0, 0, 0, 0]), 1);
+});
+
+Deno.test('caixas fora da faixa ou invertidas são normalizadas; formatos inválidos falham', () => {
+  const count = validate(suggestion([[-20, 1200, 300, 500]])).counts[0];
+  assertEquals(count.marks?.boxes, [[0, 500, 300, 1000]]);
+  for (const box of [[1, 2, 3], ['1', 2, 3, 4], [1, 2, 3, Infinity], 'caixa', null]) {
+    assertThrows(() => validate(suggestion([box])), Error);
+  }
+  assertThrows(() => validate(suggestion(Array.from({ length: 301 }, () => [0, 0, 1, 1]))), Error, 'demais');
 });
 
 Deno.test('um SKU repetido é rejeitado em vez de somado', () => {
-  const payload = suggestion(3);
+  const payload = suggestion();
   payload.counts.push(structuredClone(payload.counts[0]));
   assertThrows(() => validate(payload), Error, 'repetiu');
 });
 
-Deno.test('zero exige visibilidade completa e evidência', () => {
-  assertEquals(validate(suggestion(0)).counts[0].quantity, 0);
-  const noEvidence = suggestion(0);
-  noEvidence.counts[0].evidence_frame_ids = [];
-  assertThrows(() => validate(noEvidence), Error, 'evidência');
-  const partial = suggestion(0);
+Deno.test('zero exige frame de contagem e visibilidade completa; senão vira desconhecido', () => {
+  const zero = validate(suggestion([])).counts[0];
+  assertEquals([zero.quantity, zero.evidence_frame_ids], [0, ['frame-1']]);
+  const partial = suggestion([]);
   partial.coverage_complete = false;
-  Object.assign(partial.counts[0], { incomplete: true, needs_review: true, reason: 'Área cortada.' });
-  assertThrows(() => validate(partial), Error, 'não zero');
+  const unknown = validate(partial).counts[0];
+  assertEquals([unknown.quantity, unknown.incomplete, unknown.needs_review, unknown.marks], [null, true, true, null]);
+  assertEquals(unknown.evidence_frame_ids, []);
 });
 
-Deno.test('quantidade desconhecida não vira zero', () => {
-  const payload = suggestion(null);
-  assertThrows(() => validate(payload));
-  payload.coverage_complete = false;
-  Object.assign(payload.counts[0], { incomplete: true, needs_review: true, reason: 'Caixas ocultas.' });
-  assertEquals(validate(payload).counts[0].quantity, null);
+Deno.test('sem frame de contagem a quantidade é desconhecida, com revisão e motivo', () => {
+  const payload = suggestion([]);
+  payload.counts[0].count_frame_id = null;
+  const count = validate(payload).counts[0];
+  assertEquals([count.quantity, count.incomplete, count.needs_review], [null, true, true]);
+  assert(count.reason.length > 0);
+  // Caixas sem dizer em qual frame foram desenhadas não servem de evidência.
+  payload.counts[0].boxes = [[0, 0, 10, 10]];
+  assertThrows(() => validate(payload), Error, 'count_frame_id');
 });
 
-Deno.test('sobreposição não resolvida só aceita contagem de um único quadro', () => {
-  const payload = suggestion(4);
-  payload.overlap_resolved = false;
-  Object.assign(payload.counts[0], { incomplete: true, needs_review: true, reason: 'Parcial.' });
-  assertThrows(() => validate(payload), Error, 'único frame');
-  payload.counts[0].evidence_frame_ids = ['frame-2'];
-  assertEquals(validate(payload).counts[0].quantity, 4);
+Deno.test('cobertura ou sobreposição pendente mantém a contagem visível, mas pede conferência', () => {
+  for (const key of ['coverage_complete', 'overlap_resolved']) {
+    const payload = suggestion();
+    payload[key] = false;
+    const count = validate(payload).counts[0];
+    assertEquals([count.quantity, count.incomplete, count.needs_review], [3, true, true]);
+  }
 });
 
-Deno.test('campos extras e SKUs desconhecidos falham fechado', () => {
-  const extra = suggestion(3);
+Deno.test('arranjo frentes × profundidade estima as unidades do fundo e sempre pede conferência', () => {
+  const payload = suggestion();
+  Object.assign(payload.counts[0], { facings: 3, depth: 4, depth_frame_id: 'frame-2' });
+  const count = validate(payload).counts[0];
+  assertEquals(count.quantity, 12);
+  assertEquals(count.marks?.method, 'layout');
+  assertEquals(count.marks?.marked, 3);
+  assertEquals(count.needs_review, true);
+  assertEquals(count.evidence_frame_ids, ['frame-1', 'frame-2']);
+});
+
+Deno.test('arranjo incompleto, raso ou menor que o marcado não altera a contagem', () => {
+  const cases: Json[] = [
+    { facings: 3, depth: 4, depth_frame_id: null }, // sem o frame em que a profundidade foi vista
+    { facings: null, depth: 4, depth_frame_id: 'frame-2' },
+    { facings: 3, depth: 1, depth_frame_id: 'frame-2' },
+    { facings: 1, depth: 2, depth_frame_id: 'frame-2' }, // 2 < 3 marcadas
+    { facings: 0, depth: 0, depth_frame_id: null }, // zero vale como "não informado"
+  ];
+  for (const layout of cases) {
+    const payload = suggestion();
+    Object.assign(payload.counts[0], layout);
+    const count = validate(payload).counts[0];
+    assertEquals([count.quantity, count.marks?.method, count.needs_review], [3, 'marked', false], JSON.stringify(layout));
+  }
+  const negative = suggestion();
+  negative.counts[0].depth = -2;
+  assertThrows(() => validate(negative), Error, 'depth');
+});
+
+Deno.test('campos extras, SKUs e frames desconhecidos falham fechado', () => {
+  const extra = suggestion();
   extra.confidence = 0.9;
   assertThrows(() => validate(extra));
-  const unknownSku = suggestion(3);
+  const legacy = suggestion();
+  legacy.counts[0].quantity = 3;
+  assertThrows(() => validate(legacy), Error, 'campos inesperados');
+  const unknownSku = suggestion();
   unknownSku.counts[0].sku_id = 'sku-z';
   assertThrows(() => validate(unknownSku), Error, 'exatamente');
-  const unknownFrame = suggestion(3);
-  unknownFrame.counts[0].evidence_frame_ids = ['frame-9'];
+  const unknownFrame = suggestion();
+  unknownFrame.counts[0].count_frame_id = 'frame-9';
   assertThrows(() => validate(unknownFrame), Error, 'não foi enviado');
+  const unknownDepthFrame = suggestion();
+  Object.assign(unknownDepthFrame.counts[0], { facings: 2, depth: 3, depth_frame_id: 'frame-9' });
+  assertThrows(() => validate(unknownDepthFrame), Error, 'não foi enviado');
 });
 
 Deno.test('produtos fora do catálogo não invalidam a contagem', () => {
-  const payload = suggestion(3);
+  const payload = suggestion();
   payload.unknown_products = ['Alfajor na fileira ao lado'];
   const result = validate(payload);
   assertEquals(result.counts[0].quantity, 3);
@@ -206,12 +285,43 @@ Deno.test('chat envia principal primeiro, referências depois, e o esquema da et
   assertEquals(result.prediction.matches[0].status, 'present');
   assertEquals(result.model, 'modelo-x');
   const body = captured[0];
-  assertEquals(body.max_tokens, 4000);
+  assertEquals(body.max_tokens, 8000);
   assertEquals(body.response_format.json_schema.name, 'identify');
   const texts = body.messages[1].content.filter((p: Json) => p.type === 'text').map((p: Json) => p.text);
   assert(texts[1].startsWith('Frame PRINCIPAL; evidence_frame_id=frame-2'));
   assert(texts[3].startsWith('REFERÊNCIA SKU=sku-a'));
   assert(body.messages[0].content.includes('ETAPA: IDENTIFICAR'));
+});
+
+Deno.test('chat na contagem pede marcações e devolve a quantidade calculada pelo servidor', async () => {
+  const captured: Json[] = [];
+  const answer = {
+    video_id: 'video-1',
+    coverage_complete: true,
+    overlap_resolved: true,
+    unknown_products: [],
+    counts: [{
+      sku_id: 'sku-a',
+      count_frame_id: 'frame-2',
+      boxes: [[0, 0, 100, 100], [150, 0, 250, 100]],
+      facings: null,
+      depth: null,
+      depth_frame_id: null,
+      incomplete: false,
+      needs_review: false,
+      reason: 'Duas caixas na frente.',
+    }],
+  };
+  const result = await chat(fakeFetch(answer, { captured })).count(video, catalog, frames);
+  assertEquals(result.prediction.counts[0].quantity, 2);
+  assertEquals(result.prediction.counts[0].marks?.boxes.length, 2);
+  const body = captured[0];
+  assertEquals(body.response_format.json_schema.name, 'count');
+  const system = body.messages[0].content;
+  assert(system.includes('ETAPA: CONTAR'));
+  assert(system.includes('[x_min, y_min, x_max, y_max]'));
+  assert(system.includes('"boxes"'), 'exemplo de resposta com caixas');
+  assert(!system.includes('"quantity"'), 'o modelo não informa total');
 });
 
 Deno.test('chat aceita cercas de markdown e remove <think>', () => {
@@ -270,6 +380,9 @@ Deno.test('configuração por ambiente: chat é o padrão e mock é explícito',
   }));
   assertEquals(configured.provider.name, 'chat');
   assertEquals(configured.maxImages, 12);
+  const defaults = visionSettingsFromEnv(env({ VISION_PROVIDER: 'mock' }));
+  assertEquals([defaults.maxImages, defaults.maxIdentifyFrames, defaults.maxCountFrames], [32, 20, 10]);
+  assertEquals(visionSettingsFromEnv(env({ VISION_PROVIDER: 'mock', VISION_MAX_IDENTIFY_FRAMES: '8' })).maxIdentifyFrames, 8);
 });
 
 Deno.test('mock é determinístico nas duas etapas', async () => {
@@ -279,7 +392,8 @@ Deno.test('mock é determinístico nas duas etapas', async () => {
   assertEquals(ident.prediction.matches.map((m) => m.status), ['present', 'present', 'absent']);
   const count = await mock.count(video, many, frames);
   assertEquals(count.prediction.counts.map((c) => c.quantity), [3, 4, 5]);
-  validateStage('count', count.prediction, video.id, many.map((s) => s.id), frames.map((f) => f.id));
+  assertEquals(count.prediction.counts.map((c) => c.marks?.boxes.length), [3, 4, 5]);
+  assertEquals(count.prediction.counts.map((c) => c.marks?.frame_id), ['frame-2', 'frame-2', 'frame-2']);
 });
 
 // ---------------------------------------------------------------------------
@@ -302,6 +416,25 @@ Deno.test('lotes de identificação respeitam o limite de imagens', () => {
   assertThrows(() => identificationBatches(skus, 5, 6), ProviderError, 'fotos de referência demais');
 });
 
+Deno.test('identificação usa todos os quadros enviados quando cabem com o catálogo', () => {
+  const pool = Array.from({ length: 20 }, (_, i) => stored(`f${String(i + 1).padStart(4, '0')}`, i, i));
+  const selected = ['f0001', 'f0006', 'f0011', 'f0016', 'f0020'];
+  const skus = [1, 2, 3].map((i) => ({ id: `s${i}`, name: '', variant: '', photos: ['a', 'b'] }));
+  assertEquals(identificationFrames(pool, selected, skus, 32, 20).length, 20);
+  assertEquals(identificationFrames(pool, selected, skus, 32, 8).length, 8);
+  // 16 imagens − 6 fotos = 10 quadros, sempre com os de visão geral e espalhados no tempo.
+  const ten = identificationFrames(pool, selected, skus, 16, 20);
+  assertEquals(ten.length, 10);
+  for (const id of selected) assert(ten.some((f) => f.id === id), `mantém ${id}`);
+  const times = ten.map((f) => f.timestamp_seconds);
+  assertEquals(times, [...times].sort((a, b) => a - b));
+  assert(Math.max(...times.slice(1).map((t, i) => t - times[i])) <= 3, 'sem buracos grandes no tempo');
+  // Catálogo grande: volta aos quadros de visão geral e o catálogo vai em lotes.
+  const big = Array.from({ length: 14 }, (_, i) => ({ id: `b${i}`, name: '', variant: '', photos: ['a'] }));
+  assertEquals(identificationFrames(pool, selected, big, 16, 20).map((f) => f.id), selected);
+  assertEquals(overviewFrames(pool, selected).map((f) => f.id), selected);
+});
+
 Deno.test('quadros de contagem somam identificação e vizinhos das evidências', () => {
   const pool = [0, 2, 4, 6, 8, 10].map((t, i) => stored(`f000${i + 1}`, t, i * 40));
   const ident = [pool[0], pool[3]];
@@ -317,29 +450,54 @@ Deno.test('quadros de contagem somam identificação e vizinhos das evidências'
 });
 
 Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fica sem quantidade', () => {
-  const frames = [stored('f0001', 0, 1)];
-  const skus = ['a', 'b', 'c', 'd'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
+  const frames = [{ ...stored('f0001', 0, 1), width: 1024, height: 576 }, stored('f0002', 2, 2)];
+  const skus = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, name: id, variant: '', photos: ['p'] }));
   const identification = {
     video_id: 'cap',
     matches: skus.map((s) => ({ sku_id: s.id, status: 'present' as const, reason: `motivo ${s.id}`, evidence_frame_ids: ['f0001'] })),
     unknown_products: [],
   };
-  const result = {
+  const row = (sku: string, boxes: Json[], extra: Json = {}) => ({
+    sku_id: sku,
+    count_frame_id: 'f0001',
+    boxes,
+    facings: null,
+    depth: null,
+    depth_frame_id: null,
+    incomplete: false,
+    needs_review: false,
+    reason: '',
+    ...extra,
+  });
+  const box = (i: number) => [i * 100, 0, i * 100 + 90, 100];
+  const result = parseCountResult({
     video_id: 'cap',
     coverage_complete: true,
     overlap_resolved: true,
     unknown_products: [],
     counts: [
-      { sku_id: 'a', quantity: 5, incomplete: false, needs_review: false, reason: 'nítido', evidence_frame_ids: ['f0001'] },
-      { sku_id: 'b', quantity: 2, incomplete: false, needs_review: true, reason: 'confira', evidence_frame_ids: ['f0001'] },
-      { sku_id: 'c', quantity: null, incomplete: true, needs_review: true, reason: 'oculto', evidence_frame_ids: [] },
+      row('a', [0, 1, 2, 3, 4].map(box), { reason: 'nítido' }),
+      row('b', [box(0), box(1)], { needs_review: true, reason: 'confira' }),
+      row('c', [], { count_frame_id: null, incomplete: true, needs_review: true, reason: 'oculto' }),
+      row('e', [box(0), box(1)], { facings: 2, depth: 3, depth_frame_id: 'f0002', reason: 'fileiras' }),
     ],
-  };
+  }, 'cap', ['a', 'b', 'c', 'e'], ['f0001', 'f0002']);
   const items = countItems(skus, identification, result, frames);
-  assertEquals(items.map((i) => [i.ai_status, i.counted]), [['ok', 5], ['check', 2], ['missing', null], ['missing', null]]);
+  assertEquals(
+    items.map((i) => [i.ai_status, i.counted]),
+    [['ok', 5], ['check', 2], ['missing', null], ['missing', null], ['check', 6]],
+  );
   assertEquals(items[0].evidence_frame, 'loja/captures/cap/f0001.jpg');
+  assertEquals(items[0].ai_note, '5 unidades marcadas na imagem. nítido');
+  assertEquals(items[0].ai_marks?.frame, 'loja/captures/cap/f0001.jpg');
+  assertEquals([items[0].ai_marks?.width, items[0].ai_marks?.height], [1024, 576]);
+  assertEquals(items[0].ai_marks?.boxes.length, 5);
+  assertEquals(items[2].ai_marks, null);
   assertEquals(items[3].ai_note, 'motivo d');
-  assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing'), true);
+  assertEquals(items[4].ai_marks?.method, 'layout');
+  assertEquals(items[4].ai_marks?.depth_frame, 'loja/captures/cap/f0002.jpg');
+  assert(items[4].ai_note.startsWith('Estimativa pelo arranjo: 2 frentes × 3 de profundidade = 6; 2 unidades marcadas'));
+  assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing' && i.ai_marks === null), true);
 });
 
 Deno.test('notas longas da IA não são cortadas em 300 caracteres em countItems nem noMatchItems', () => {
@@ -378,6 +536,7 @@ Deno.test('notas longas da IA não são cortadas em 300 caracteres em countItems
         needs_review: true,
         reason: longCountReason,
         evidence_frame_ids: ['f0001'],
+        marks: null,
       },
     ],
   };

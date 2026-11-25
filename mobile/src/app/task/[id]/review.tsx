@@ -23,8 +23,10 @@ import { Badge } from '../../../components/Badge';
 import { Stepper } from '../../../components/Stepper';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { EvidenceImage } from '../../../components/EvidenceImage';
 import { colors, typography } from '../../../constants/theme';
 import { confirmAction, showMessage } from '../../../utils/confirm';
+import { type AiMarks, itemMarks, marksCaption } from '../../../utils/evidence-marks';
 import {
   countAttentionItems,
   filterReviewItems,
@@ -46,7 +48,9 @@ export default function ReviewScreen() {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [submitting, setSubmitting] = useState(false);
-  const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; title: string } | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<{ url: string; title: string; marks?: AiMarks | null } | null>(
+    null,
+  );
 
   const { data: task, isLoading } = useQuery({
     queryKey: ['task_detail', id],
@@ -165,6 +169,7 @@ export default function ReviewScreen() {
     const currentCount = counts[item.product_id] ?? null;
     const photoUrl = api.resolveMediaUrl(item.photo);
     const evidenceUrl = api.resolveMediaUrl(item.evidence_frame);
+    const marks = itemMarks(item);
 
     return (
       <Card style={styles.productCard}>
@@ -240,10 +245,12 @@ export default function ReviewScreen() {
         {evidenceUrl ? (
           <TouchableOpacity
             style={styles.evidenceBtn}
-            onPress={() => setSelectedPhoto({ url: evidenceUrl, title: `Frame Usado: ${item.name}` })}
+            onPress={() => setSelectedPhoto({ url: evidenceUrl, title: `Frame Usado: ${item.name}`, marks })}
           >
             <Ionicons name="eye-outline" size={15} color={colors.primary} />
-            <Text style={styles.evidenceBtnText}>Ver imagem de evidência da IA</Text>
+            <Text style={styles.evidenceBtnText}>
+              {marks ? `Ver unidades marcadas (${marksCaption(marks)})` : 'Ver imagem de evidência da IA'}
+            </Text>
           </TouchableOpacity>
         ) : null}
 
@@ -415,13 +422,17 @@ export default function ReviewScreen() {
               </TouchableOpacity>
             </View>
 
-            {selectedPhoto?.url && (
-              <Image
-                source={{ uri: selectedPhoto.url }}
-                style={styles.modalImage}
-                contentFit="contain"
-              />
-            )}
+            {selectedPhoto?.url ? (
+              selectedPhoto.marks ? (
+                <EvidenceImage url={selectedPhoto.url} marks={selectedPhoto.marks} />
+              ) : (
+                <Image
+                  source={{ uri: selectedPhoto.url }}
+                  style={styles.modalImage}
+                  contentFit="contain"
+                />
+              )
+            ) : null}
           </SafeAreaView>
         </View>
       </Modal>

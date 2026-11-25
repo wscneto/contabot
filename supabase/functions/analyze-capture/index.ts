@@ -13,8 +13,10 @@ import {
   countingFrames,
   countItems,
   identificationBatches,
+  identificationFrames,
   mergeIdentifications,
   noMatchItems,
+  overviewFrames,
   possibleSkus,
   type StoredFrame,
   toResultFrames,
@@ -117,13 +119,6 @@ async function toVisionFrames(frames: StoredFrame[], load: (path: string) => Pro
   })));
 }
 
-function identificationFrames(capture: CaptureRow): StoredFrame[] {
-  const selected = new Set(capture.selected_frame_ids);
-  return capture.frames
-    .filter((f) => selected.has(f.id))
-    .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
-}
-
 async function rpc(admin: SupabaseClient, fn: string, args: Record<string, unknown>) {
   const { data, error } = await admin.rpc(fn, args);
   if (error) throw new Error(`${fn}: ${error.message}`);
@@ -144,7 +139,15 @@ async function triggerCounting(captureId: string) {
 async function runIdentification(admin: SupabaseClient, settings: VisionSettings, capture: CaptureRow) {
   const { provider } = settings;
   const catalog = await loadCatalog(admin, capture.task_id);
-  const frames = identificationFrames(capture);
+  // Todos os quadros enviados pelo celular (até VISION_MAX_IDENTIFY_FRAMES), não só
+  // os de visão geral: um produto que aparece só num trecho curto não se perde.
+  const frames = identificationFrames(
+    capture.frames,
+    capture.selected_frame_ids,
+    catalog,
+    settings.maxImages,
+    settings.maxIdentifyFrames,
+  );
   const load = imageLoader(admin);
   const visionFrames = await toVisionFrames(frames, load);
   const video = { id: capture.id, primary_frame_id: capture.primary_frame_id };
@@ -184,10 +187,9 @@ async function runCounting(admin: SupabaseClient, settings: VisionSettings, capt
   if (!identification) throw new Error('Identificação ausente para a etapa de contagem.');
   const catalog = await loadCatalog(admin, capture.task_id);
   const possible = possibleSkus(catalog, identification);
-  const identFrames = identificationFrames(capture);
   const frames = countingFrames(
     capture.frames,
-    identFrames,
+    overviewFrames(capture.frames, capture.selected_frame_ids),
     possible,
     identification,
     settings.maxImages,
@@ -195,8 +197,10 @@ async function runCounting(admin: SupabaseClient, settings: VisionSettings, capt
   );
 
   const load = imageLoader(admin);
+  // Com muitas evidências o principal pode ficar fora do orçamento de quadros.
+  const primary = frames.some((f) => f.id === capture.primary_frame_id) ? capture.primary_frame_id : frames[0].id;
   const result = await provider.count(
-    { id: capture.id, primary_frame_id: capture.primary_frame_id, identification },
+    { id: capture.id, primary_frame_id: primary, identification },
     await toVisionSkus(possible, load),
     await toVisionFrames(frames, load),
   );

@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@1';
 import {
+  adaptiveSampleHz,
   areSimilar,
   candidateTimes,
   computeFingerprint,
@@ -125,6 +126,25 @@ Deno.test('candidatos cobrem o vídeo inteiro e respeitam o limite', () => {
   assert(capped[capped.length - 1] > 50, 'inclui o fim');
   assert(capped.every((t, i) => i === 0 || t > capped[i - 1]), 'monotônico');
   assertEquals(candidateTimes(0, 1, 10), []);
+});
+
+Deno.test('vídeos curtos examinam mais quadros por segundo, com teto de candidatos', () => {
+  assertEquals(adaptiveSampleHz(10), 3);
+  assertEquals(adaptiveSampleHz(20), 3);
+  assertEquals(adaptiveSampleHz(25), 2);
+  assertEquals(adaptiveSampleHz(30), 2);
+  assertEquals(adaptiveSampleHz(40), 1.5);
+  assertEquals(adaptiveSampleHz(45), 1);
+  assertEquals(adaptiveSampleHz(60), 1);
+  assertEquals(adaptiveSampleHz(0), 1);
+  assertEquals(adaptiveSampleHz(Number.NaN), 1);
+  for (const duration of [3, 8, 15, 20, 27, 33, 41, 59, 60]) {
+    const hz = adaptiveSampleHz(duration);
+    const times = candidateTimes(duration, hz, 120);
+    assert(times.length <= 62, `${duration}s → ${times.length} candidatos`);
+    assert(times.length >= Math.floor(duration), `${duration}s cobre ao menos 1 quadro/s`);
+  }
+  assertEquals(candidateTimes(20, adaptiveSampleHz(20), 120).length, 61); // 3/s + o último quadro
 });
 
 Deno.test('heurísticas de qualidade detectam borrão e áreas claras', () => {

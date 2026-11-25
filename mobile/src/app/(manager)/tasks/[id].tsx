@@ -18,9 +18,11 @@ import { api } from '../../../services/api';
 import { exportApprovedTaskCsv } from '../../../utils/exportCsv';
 import { confirmAction, showMessage } from '../../../utils/confirm';
 import { formatIsoDateToBR } from '../../../utils/date';
+import { type AiMarks, itemMarks } from '../../../utils/evidence-marks';
 import { Header } from '../../../components/Header';
 import { Badge } from '../../../components/Badge';
 import { Card } from '../../../components/Card';
+import { EvidenceImage } from '../../../components/EvidenceImage';
 import { Button } from '../../../components/Button';
 import { ExportCsvButton } from '../../../components/ExportCsvButton';
 import { Input } from '../../../components/Input';
@@ -38,7 +40,9 @@ export default function ManagerTaskDetailScreen() {
   const [recounting, setRecounting] = useState(false);
   const [recountModal, setRecountModal] = useState(false);
   const [recountNote, setRecountNote] = useState('');
-  const [selectedFrame, setSelectedFrame] = useState<{ url: string; title: string } | null>(null);
+  const [selectedFrame, setSelectedFrame] = useState<{ url: string; title: string; marks?: AiMarks | null } | null>(
+    null,
+  );
   const [countOverrides, setCountOverrides] = useState<Record<string, number | null>>({});
 
   const { data: task, isLoading } = useQuery({
@@ -266,6 +270,7 @@ export default function ManagerTaskDetailScreen() {
         {task.items?.map((item: any) => {
           const photoUrl = api.resolveMediaUrl(item.photo);
           const evidenceUrl = api.resolveMediaUrl(item.evidence_frame);
+          const marks = itemMarks(item);
           const prev = item.previous;
           const hasOverride = Object.prototype.hasOwnProperty.call(countOverrides, item.product_id);
           const finalValue = isApproved
@@ -302,7 +307,7 @@ export default function ManagerTaskDetailScreen() {
                     )}
                     {evidenceUrl && (
                       <TouchableOpacity
-                        onPress={() => setSelectedFrame({ url: evidenceUrl, title: item.name })}
+                        onPress={() => setSelectedFrame({ url: evidenceUrl, title: item.name, marks })}
                         style={styles.frameLink}
                       >
                         <Ionicons name="image-outline" size={13} color={colors.primary} />
@@ -471,13 +476,17 @@ export default function ManagerTaskDetailScreen() {
                 <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
-            {selectedFrame?.url && (
-              <Image
-                source={{ uri: selectedFrame.url }}
-                style={styles.frameModalImage}
-                contentFit="contain"
-              />
-            )}
+            {selectedFrame?.url ? (
+              selectedFrame.marks ? (
+                <EvidenceImage url={selectedFrame.url} marks={selectedFrame.marks} />
+              ) : (
+                <Image
+                  source={{ uri: selectedFrame.url }}
+                  style={styles.frameModalImage}
+                  contentFit="contain"
+                />
+              )
+            ) : null}
           </SafeAreaView>
         </View>
       </Modal>
