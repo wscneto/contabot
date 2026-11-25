@@ -244,9 +244,6 @@ export class ChatCompletionsProvider implements VisionProvider {
           count_frame_id: video.primary_frame_id,
           // Duas unidades lado a lado, no formato de caixa pedido a este modelo.
           boxes: exampleBoxes(this.options.boxFormat),
-          facings: null,
-          depth: null,
-          depth_frame_id: null,
           incomplete: false,
           needs_review: false,
           reason: 'Duas unidades marcadas lado a lado na fileira frontal.',
@@ -476,9 +473,6 @@ export class MockProvider implements VisionProvider {
         sku_id: sku.id,
         count_frame_id: video.primary_frame_id,
         boxes: mockBoxes(index, index + 3),
-        facings: null,
-        depth: null,
-        depth_frame_id: null,
         incomplete: false,
         needs_review: index % 2 === 1,
         reason: index % 2 === 1

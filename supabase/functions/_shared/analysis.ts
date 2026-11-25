@@ -34,10 +34,6 @@ export interface ItemMarks {
   boxes: Box[];
   marked: number;
   duplicates_removed: number;
-  method: 'marked' | 'layout';
-  facings: number | null;
-  depth: number | null;
-  depth_frame: string | null;
 }
 
 export interface ItemUpdate {
@@ -198,15 +194,11 @@ function plural(n: number, singular: string, pluralForm: string): string {
 }
 
 /** Resumo de como a quantidade foi obtida, antes do motivo do modelo. */
-export function marksSummary(marks: ItemMarks, quantity: number): string {
+export function marksSummary(marks: ItemMarks): string {
   const marked = plural(marks.marked, 'unidade marcada', 'unidades marcadas');
   const repeated = marks.duplicates_removed
     ? ` (${plural(marks.duplicates_removed, 'marcação repetida descartada', 'marcações repetidas descartadas')})`
     : '';
-  if (marks.method === 'layout') {
-    return `Estimativa pelo arranjo: ${plural(marks.facings!, 'frente', 'frentes')} × ${marks.depth} de profundidade = ` +
-      `${quantity}; ${marked} na imagem${repeated}. Confira as unidades do fundo.`;
-  }
   return `${marked} na imagem${repeated}.`;
 }
 
@@ -250,13 +242,9 @@ export function countItems(
         boxes: marks.boxes,
         marked: marks.marked,
         duplicates_removed: marks.duplicates_removed,
-        method: marks.method,
-        facings: marks.facings,
-        depth: marks.depth,
-        depth_frame: marks.depth_frame_id ? frameById.get(marks.depth_frame_id)?.path ?? null : null,
       }
       : null;
-    const summary = aiMarks && count.quantity !== null ? marksSummary(aiMarks, count.quantity) : '';
+    const summary = aiMarks && count.quantity !== null ? marksSummary(aiMarks) : '';
     return {
       product_id: sku.id,
       ai_quantity: count.quantity,

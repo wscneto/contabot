@@ -42,11 +42,6 @@ export interface RawSkuCount {
   count_frame_id: string | null;
   /** Uma caixa por unidade física do SKU visível em count_frame_id. */
   boxes: Box[];
-  /** Frentes (colunas) do produto na vista frontal, para a estimativa por arranjo. */
-  facings: number | null;
-  /** Unidades por fileira, da frente para o fundo, vistas em depth_frame_id. */
-  depth: number | null;
-  depth_frame_id: string | null;
   incomplete: boolean;
   needs_review: boolean;
   reason: string;
@@ -67,11 +62,6 @@ export interface CountMarks {
   boxes: Box[];
   marked: number;
   duplicates_removed: number;
-  facings: number | null;
-  depth: number | null;
-  depth_frame_id: string | null;
-  /** marked = número de caixas; layout = frentes × profundidade. */
-  method: 'marked' | 'layout';
 }
 
 /** Contagem consolidada pelo servidor a partir das marcações do modelo. */
@@ -95,7 +85,6 @@ export interface CountResult {
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
-const nullableInteger = { anyOf: [{ type: 'integer' }, { type: 'null' }] };
 
 export const SCHEMAS: Record<Stage, Record<string, unknown>> = {
   identify: {
@@ -137,9 +126,6 @@ export const SCHEMAS: Record<Stage, Record<string, unknown>> = {
             sku_id: { type: 'string' },
             count_frame_id: nullableString,
             boxes: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
-            facings: nullableInteger,
-            depth: nullableInteger,
-            depth_frame_id: nullableString,
             incomplete: { type: 'boolean' },
             needs_review: { type: 'boolean' },
             reason: { type: 'string' },
@@ -148,9 +134,6 @@ export const SCHEMAS: Record<Stage, Record<string, unknown>> = {
             'sku_id',
             'count_frame_id',
             'boxes',
-            'facings',
-            'depth',
-            'depth_frame_id',
             'incomplete',
             'needs_review',
             'reason',
@@ -227,17 +210,7 @@ function nullableStr(value: unknown, where: string): string | null {
   return value === null ? null : str(value, where);
 }
 
-/** Inteiro positivo ou null; 0 é tratado como "não informado". */
-function positiveIntOrNull(value: unknown, where: string): number | null {
-  if (value === null) return null;
-  if (!(typeof value === 'number' && Number.isInteger(value) && value >= 0)) {
-    throw new SchemaError(`${where} deve ser inteiro não negativo ou null.`);
-  }
-  return value === 0 ? null : value;
-}
-
 export const MAX_BOXES_PER_SKU = 300;
-const MAX_LAYOUT_QUANTITY = 1000;
 
 /**
  * Ordem das coordenadas que o modelo escreve. Gemini é treinado com
@@ -278,7 +251,7 @@ function parseRawCount(value: unknown, i: number, format: BoxFormat): RawSkuCoun
   const where = `counts[${i}]`;
   const o = exactObject(
     value,
-    ['sku_id', 'count_frame_id', 'boxes', 'facings', 'depth', 'depth_frame_id', 'incomplete', 'needs_review', 'reason'],
+    ['sku_id', 'count_frame_id', 'boxes', 'incomplete', 'needs_review', 'reason'],
     where,
   );
   const boxes = list(o.boxes, `${where}.boxes`);
@@ -287,9 +260,6 @@ function parseRawCount(value: unknown, i: number, format: BoxFormat): RawSkuCoun
     sku_id: str(o.sku_id, `${where}.sku_id`),
     count_frame_id: nullableStr(o.count_frame_id, `${where}.count_frame_id`),
     boxes: boxes.map((b, k) => parseBox(b, `${where}.boxes[${k}]`, format)),
-    facings: positiveIntOrNull(o.facings, `${where}.facings`),
-    depth: positiveIntOrNull(o.depth, `${where}.depth`),
-    depth_frame_id: nullableStr(o.depth_frame_id, `${where}.depth_frame_id`),
     incomplete: bool(o.incomplete, `${where}.incomplete`),
     needs_review: bool(o.needs_review, `${where}.needs_review`),
     reason: str(o.reason, `${where}.reason`),
@@ -328,11 +298,8 @@ const NO_FRAME_REASON = 'Nenhum frame permite distinguir as unidades deste produ
 const REVIEW_REASON = 'Confira a quantidade na prateleira.';
 
 /**
- * Converte as marcações do modelo numa quantidade. O servidor conta as caixas
- * (sem duplicadas) do único frame de contagem; quando o modelo informa o
- * arranjo (frentes × profundidade vista de lado ou de cima) e ele indica mais
- * unidades que as marcadas, usa essa estimativa e sempre pede conferência.
- * Nunca soma frames diferentes.
+ * Converte as marcações do modelo numa quantidade: o número de caixas (sem
+ * duplicadas) do único frame de contagem. Nunca soma frames diferentes.
  */
 export function consolidateCount(raw: RawSkuCount, coverageComplete: boolean, overlapResolved: boolean): SkuCount {
   const partial = !coverageComplete || !overlapResolved;
@@ -341,19 +308,12 @@ export function consolidateCount(raw: RawSkuCount, coverageComplete: boolean, ov
 
   if (raw.count_frame_id !== null) {
     const boxes = dedupeBoxes(raw.boxes);
-    const hasLayout = raw.facings !== null && raw.depth !== null && raw.depth >= 2 && raw.depth_frame_id !== null;
-    const layout = hasLayout ? Math.min(MAX_LAYOUT_QUANTITY, raw.facings! * raw.depth!) : null;
-    const method = layout !== null && layout > boxes.length ? 'layout' : 'marked';
-    quantity = method === 'layout' ? layout : boxes.length;
+    quantity = boxes.length;
     marks = {
       frame_id: raw.count_frame_id,
       boxes,
       marked: boxes.length,
       duplicates_removed: raw.boxes.length - boxes.length,
-      facings: hasLayout ? raw.facings : null,
-      depth: hasLayout ? raw.depth : null,
-      depth_frame_id: hasLayout ? raw.depth_frame_id : null,
-      method,
     };
     // Sem visão da área inteira, nenhuma caixa marcada não comprova estoque zero.
     if (quantity === 0 && (partial || raw.incomplete)) {
@@ -363,11 +323,9 @@ export function consolidateCount(raw: RawSkuCount, coverageComplete: boolean, ov
   }
 
   const incomplete = raw.incomplete || partial || quantity === null;
-  const needsReview = raw.needs_review || incomplete || marks?.method === 'layout';
+  const needsReview = raw.needs_review || incomplete;
   const reason = raw.reason.trim() || (quantity === null ? NO_FRAME_REASON : needsReview ? REVIEW_REASON : '');
-  const evidence = marks === null
-    ? []
-    : [...new Set([marks.frame_id, ...(marks.method === 'layout' && marks.depth_frame_id ? [marks.depth_frame_id] : [])])];
+  const evidence = marks === null ? [] : [marks.frame_id];
   return {
     sku_id: raw.sku_id,
     quantity,
@@ -449,7 +407,7 @@ export function parseRawCountResult(
     result.video_id,
     result.counts.map((c) => ({
       sku_id: c.sku_id,
-      evidence_frame_ids: [...new Set([c.count_frame_id, c.depth_frame_id].filter((f): f is string => f !== null))],
+      evidence_frame_ids: c.count_frame_id === null ? [] : [c.count_frame_id],
     })),
     videoId,
     skuIds,
