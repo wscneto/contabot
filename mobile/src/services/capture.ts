@@ -2,7 +2,7 @@
  * Seleção de quadros no próprio celular (substitui o OpenCV/FFmpeg do servidor).
  *
  * 1. cria a captura (RPC start_capture);
- * 2. extrai ~1 quadro/s com expo-video, reduz para 640 px e calcula nitidez,
+ * 2. extrai 1 a 3 quadros/s (mais em vídeos curtos) com expo-video, reduz para 640 px e calcula nitidez,
  *    exposição, movimento, reflexo e assinatura de similaridade;
  * 3. escolhe os quadros de identificação e os vizinhos úteis para a contagem;
  * 4. envia só esses quadros (JPEG 1920 px) ao Storage e registra os metadados;
@@ -16,6 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 import { decode as decodeJpeg } from 'jpeg-js';
 import {
+  adaptiveSampleHz,
   candidateTimes,
   computeFingerprint,
   computeQuality,
@@ -37,7 +38,11 @@ export { evaluateAnalyzingState, initialReviewCounts };
 export { normalizeVideoUri, prepareVideoUriCandidates };
 
 export const CAPTURE_SETTINGS = {
-  sampleHz: 1,
+  /** Quadros/s examinados: 3 em vídeos de até 20 s, caindo até 1 em vídeos de 60 s. */
+  minSampleHz: 1,
+  maxSampleHz: 3,
+  /** Alvo de candidatos por vídeo; limita o tempo de processamento no aparelho. */
+  targetCandidates: 60,
   maxCandidates: 120,
   maxIdentificationFrames: 5,
   /** Quadros enviados ao servidor (identificação + vizinhos para a contagem). */
@@ -241,7 +246,13 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
     }
 
     // 1. Candidatos: decodifica em lotes pequenos para limitar a memória.
-    const times = candidateTimes(duration, CAPTURE_SETTINGS.sampleHz, CAPTURE_SETTINGS.maxCandidates);
+    const sampleHz = adaptiveSampleHz(
+      duration,
+      CAPTURE_SETTINGS.targetCandidates,
+      CAPTURE_SETTINGS.minSampleHz,
+      CAPTURE_SETTINGS.maxSampleHz,
+    );
+    const times = candidateTimes(duration, sampleHz, CAPTURE_SETTINGS.maxCandidates);
     const candidates: FrameCandidate[] = [];
     let previousMotion: Float32Array | null = null;
     for (let start = 0; start < times.length; start += CAPTURE_SETTINGS.thumbnailBatch) {
@@ -325,7 +336,7 @@ async function runCapture(taskId: string, videoUri: string, emit: (p: CapturePro
       platform: Platform.OS,
       duration_seconds: duration,
       candidates: candidates.length,
-      sample_hz: CAPTURE_SETTINGS.sampleHz,
+      sample_hz: sampleHz,
       analysis_max_dimension: CAPTURE_SETTINGS.analysisMaxDimension,
       upload_max_dimension: CAPTURE_SETTINGS.uploadMaxDimension,
       warnings: [

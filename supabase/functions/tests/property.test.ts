@@ -21,7 +21,14 @@ import {
   selectUploadPool,
 } from '../_shared/frame-selection.ts';
 import { parseModelJson } from '../_shared/providers.ts';
-import { type CountResult, type Identification, ProviderError, validateStage } from '../_shared/vision.ts';
+import {
+  type Box,
+  type CountResult,
+  type Identification,
+  ProviderError,
+  type RawCountResult,
+  validateStage,
+} from '../_shared/vision.ts';
 
 const RUNS = { numRuns: 300 };
 
@@ -82,7 +89,12 @@ const validIdentification = scenario.chain((s) =>
   }))
 );
 
-/** Contagem que respeita todas as regras do contrato. */
+const coord = fc.integer({ min: 0, max: 1000 });
+const box = fc.tuple(coord, coord, coord, coord).map(([a, b, c, d]) =>
+  [Math.min(a, c), Math.min(b, d), Math.max(a, c), Math.max(b, d)] as Box
+);
+
+/** Contagem (marcações do modelo) que respeita todas as regras do contrato. */
 const validCount = scenario.chain((s) =>
   fc.tuple(
     fc.constant(s),
@@ -91,44 +103,38 @@ const validCount = scenario.chain((s) =>
     fc.tuple(
       ...s.skuIds.map((sku) =>
         fc.record({
-          quantity: fc.option(fc.nat({ max: 500 }), { nil: null }),
+          frame: fc.option(fc.constantFrom(...s.frameIds), { nil: null }),
+          boxes: fc.array(box, { maxLength: 25 }),
+          facings: fc.option(fc.integer({ min: 0, max: 30 }), { nil: null }),
+          depth: fc.option(fc.integer({ min: 0, max: 30 }), { nil: null }),
+          depthFrame: fc.option(fc.constantFrom(...s.frameIds), { nil: null }),
           incomplete: fc.boolean(),
           needsReview: fc.boolean(),
-          reason: nonBlank,
-          evidence: evidenceFrom(s.frameIds),
-        }).map((r) => ({ sku, ...r }))
+          reason: fc.string({ maxLength: 40 }),
+        }).map((r) => ({
+          sku_id: sku,
+          count_frame_id: r.frame,
+          boxes: r.frame === null ? [] : r.boxes,
+          facings: r.facings,
+          depth: r.depth,
+          depth_frame_id: r.depthFrame,
+          incomplete: r.incomplete,
+          needs_review: r.needsReview,
+          reason: r.reason,
+        }))
       ),
     ),
     fc.array(fc.string({ maxLength: 30 }), { maxLength: 3 }),
-  ).map(([sc, coverage, overlap, rows, unknown]) => {
-    const partial = !coverage || !overlap;
-    const counts = rows.map((r) => {
-      let quantity = r.quantity;
-      if (partial && quantity === 0) quantity = null; // sem visibilidade completa, zero é desconhecido
-      const incomplete = partial || quantity === null || r.incomplete;
-      let evidence = r.evidence;
-      if (quantity !== null && evidence.length === 0) evidence = [sc.frameIds[0]];
-      if (!overlap && quantity !== null) evidence = evidence.slice(0, 1);
-      return {
-        sku_id: r.sku,
-        quantity,
-        incomplete,
-        needs_review: incomplete || r.needsReview,
-        reason: r.reason,
-        evidence_frame_ids: evidence,
-      };
-    });
-    return {
-      sc,
-      payload: {
-        video_id: sc.videoId,
-        coverage_complete: coverage,
-        overlap_resolved: overlap,
-        counts,
-        unknown_products: unknown,
-      } as CountResult,
-    };
-  })
+  ).map(([sc, coverage, overlap, counts, unknown]) => ({
+    sc,
+    payload: {
+      video_id: sc.videoId,
+      coverage_complete: coverage,
+      overlap_resolved: overlap,
+      counts,
+      unknown_products: unknown,
+    } as RawCountResult,
+  }))
 );
 
 /** Mutações que sempre tornam a resposta inválida. */
@@ -149,7 +155,9 @@ const MUTATIONS: Record<string, Mutation> = {
   'frame não enviado como evidência': (p, k) => ({
     ...p,
     [k]: (p[k] as Record<string, unknown>[]).map((r, i) =>
-      i === 0 ? { ...r, evidence_frame_ids: [...(r.evidence_frame_ids as string[]), 'frame-fantasma'] } : r
+      i !== 0 ? r : 'count_frame_id' in r
+        ? { ...r, count_frame_id: 'frame-fantasma' }
+        : { ...r, evidence_frame_ids: [...(r.evidence_frame_ids as string[]), 'frame-fantasma'] }
     ),
   }),
   'linhas viram texto': (p, k) => ({ ...p, [k]: 'nenhum' }),
@@ -190,11 +198,36 @@ Deno.test('propriedade: identificação que respeita o contrato é aceita sem al
   );
 });
 
-Deno.test('propriedade: contagem que respeita o contrato é aceita sem alterações', () => {
+Deno.test('propriedade: contagem que respeita o contrato é aceita e consolidada sem somar frames', () => {
   fc.assert(
     fc.property(validCount, ({ sc, payload }) => {
-      const out = validateStage('count', payload, sc.videoId, sc.skuIds, sc.frameIds);
-      assertEquals(out, payload);
+      const out = validateStage('count', payload, sc.videoId, sc.skuIds, sc.frameIds) as CountResult;
+      const partial = !payload.coverage_complete || !payload.overlap_resolved;
+      assertEquals(out.counts.map((c) => c.sku_id), payload.counts.map((c) => c.sku_id));
+      out.counts.forEach((count, i) => {
+        const raw = payload.counts[i];
+        if (count.quantity === null) {
+          assertEquals([count.incomplete, count.needs_review, count.evidence_frame_ids], [true, true, []]);
+          assert(count.reason.trim().length > 0, 'desconhecido sempre tem motivo');
+          return;
+        }
+        const marks = count.marks!;
+        assertEquals(marks.frame_id, raw.count_frame_id);
+        assertEquals(marks.marked, marks.boxes.length);
+        assertEquals(marks.marked + marks.duplicates_removed, raw.boxes.length);
+        assert(marks.boxes.length <= raw.boxes.length);
+        // A quantidade vem das caixas de UM frame ou da estimativa frentes × profundidade.
+        if (marks.method === 'marked') assertEquals(count.quantity, marks.marked);
+        else {
+          assertEquals(count.quantity, marks.facings! * marks.depth!);
+          assert(count.quantity > marks.marked);
+          assert(count.needs_review, 'estimativa pelo arranjo sempre pede conferência');
+        }
+        if (count.quantity === 0) assert(!partial && !raw.incomplete, 'zero só com visão completa');
+        if (partial) assert(count.incomplete && count.needs_review);
+        if (count.incomplete) assert(count.needs_review);
+        assert(count.evidence_frame_ids.length >= 1 && count.evidence_frame_ids[0] === raw.count_frame_id);
+      });
     }),
     RUNS,
   );
@@ -227,7 +260,8 @@ Deno.test('propriedade: qualquer mutação que quebra o contrato é rejeitada', 
 
 Deno.test('propriedade: countItems cobre o catálogo inteiro e o status reflete a sugestão', () => {
   fc.assert(
-    fc.property(validCount, ({ sc, payload }) => {
+    fc.property(validCount, ({ sc, payload: raw }) => {
+      const payload = validateStage('count', raw, sc.videoId, sc.skuIds, sc.frameIds) as CountResult;
       const catalog: CatalogEntry[] = sc.skuIds.map((sku) => ({ id: sku, name: sku, variant: '', photos: [] }));
       const frames = sc.frameIds.map((fid, i) => ({ id: fid, path: `x/${fid}.jpg`, timestamp_seconds: i })) as
         unknown as StoredFrame[];

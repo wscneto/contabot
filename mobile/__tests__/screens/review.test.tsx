@@ -107,4 +107,44 @@ describe('ReviewScreen', () => {
     await user.press(screen.getByRole('button', { name: 'Ver todos os itens' }));
     expect(screen.getByText('Açúcar')).toBeOnTheScreen();
   });
+
+  test('item com marcações da IA abre o quadro com as unidades desenhadas', async () => {
+    const frame = 'loja/captures/c1/f0004.jpg';
+    mockGetTask.mockResolvedValue({
+      id: 'task-1',
+      status: 'review',
+      area: { id: 'a1', name: 'Gôndola 1' },
+      items: [
+        {
+          product_id: 'p-ok',
+          name: 'Açúcar',
+          ai_status: 'ok',
+          ai_quantity: 3,
+          counted: 3,
+          ai_note: '3 unidades marcadas na imagem.',
+          photo: null,
+          evidence_frame: frame,
+          ai_marks: {
+            frame,
+            width: 1024,
+            height: 576,
+            boxes: [[10, 10, 100, 100], [110, 10, 200, 100], [210, 10, 300, 100]],
+            marked: 3,
+            duplicates_removed: 0,
+            method: 'marked',
+            facings: null,
+            depth: null,
+            depth_frame: null,
+          },
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    await renderScreen();
+
+    await user.press(await screen.findByText('Ver unidades marcadas (3 unidades marcadas pela IA)'));
+    expect(screen.getByText('Frame Usado: Açúcar')).toBeOnTheScreen();
+    expect(screen.getByLabelText('Ocultar marcações')).toBeOnTheScreen();
+  });
 });

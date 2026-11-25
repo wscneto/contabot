@@ -97,9 +97,13 @@ TaskSummary = { id, area_id, area_name, status, recount_requested: boolean, due_
 TaskItem = { product_id, name, variant, photo: string|null,
              ai_quantity: number|null, ai_status: 'ok'|'check'|'missing'|'manual', ai_note: string,
              evidence_frame: string|null,          // URL do frame que embasou o número
+             ai_marks: AiMarks|null,               // caixas desenhadas pela IA nesse frame
              counted: number|null,                 // conferido pelo funcionário
              final: number|null,                   // aprovado pelo gerente
              previous: number|null }               // última contagem aprovada desta área
+AiMarks  = { frame, width, height, boxes: [x_min, y_min, x_max, y_max][],   // 0–1000, uma por unidade
+             marked, duplicates_removed, method: 'marked'|'layout',
+             facings: number|null, depth: number|null, depth_frame: string|null }
 Capture  = { id, status: 'processing'|'done'|'failed', stage: 'frames'|'identifying'|'counting'|null,
              error: string|null, frames: [{id, url, timestamp_seconds}],   // quadros usados na contagem
              unknown_products: string[], simulated: boolean, created_at, by: {id,name} }
@@ -144,14 +148,18 @@ TaskDetail = TaskSummary & { items: TaskItem[], capture: Capture|null, capture_c
 
 ## Pipeline de visão
 
-**No celular** (`mobile/src/services/capture.ts` + `supabase/functions/_shared/frame-selection.ts`): o `expo-video` gera ~1 quadro/s (até 120 candidatos). Cada quadro é reduzido a 640 px e decodificado em JS (`jpeg-js`) para calcular as mesmas heurísticas do antigo `video.py` (OpenCV): variância do Laplaciano, exposição, reflexo, movimento e uma assinatura (miniatura 32×18 + difference hash). Com elas, o app escolhe até 5 quadros de identificação (melhor qualidade por faixa temporal, sem quase idênticos) e completa com vizinhos a ±2/4/6 s (até 20 quadros), enviados em JPEG ≤ 1920 px. Diferenças em relação ao OpenCV:
+**No celular** (`mobile/src/services/capture.ts` + `supabase/functions/_shared/frame-selection.ts`): o `expo-video` gera de 1 a 3 quadros/s conforme a duração (`adaptiveSampleHz`: 3/s até 20 s, 2/s até 30 s, 1/s em 60 s; cerca de 60 candidatos). Cada quadro é reduzido a 640 px e decodificado em JS (`jpeg-js`) para calcular as mesmas heurísticas do antigo `video.py` (OpenCV): variância do Laplaciano, exposição, reflexo, movimento e uma assinatura (miniatura 32×18 + difference hash). Com elas, o app escolhe até 5 quadros de identificação (melhor qualidade por faixa temporal, sem quase idênticos) e completa com vizinhos a ±2/4/6 s (até 20 quadros), enviados em JPEG ≤ 1024 px. Diferenças em relação ao OpenCV:
 - a nitidez é medida a 640 px em vez de 960 px, então os valores absolutos mudam de escala;
-- o "movimento" compara candidatos consecutivos (≈1 s), não quadros adjacentes do vídeo;
+- o "movimento" compara candidatos consecutivos (⅓ a 1 s), não quadros adjacentes do vídeo;
 - a orientação vem do decodificador da plataforma, sem `ffprobe`.
 
 Os limites de aviso continuam heurísticas não calibradas.
 
-**No servidor** (`supabase/functions/analyze-capture`): faz **identificar → contar** com os mesmos prompts e as mesmas regras de validação estrita de `domain.py` (`_shared/vision.ts`). Os quadros da contagem são escolhidos entre os enviados pelo celular (`selectCountingFrames`). Cada etapa roda numa invocação própria, em segundo plano, para caber no limite de tempo das Edge Functions. `pipeline_claim` impede análise duplicada. O provedor é qualquer API compatível com OpenAI Chat Completions, configurada por `VISION_*`, ou `mock`.
+**No servidor** (`supabase/functions/analyze-capture`): faz **identificar → contar** com validação estrita das respostas (`_shared/vision.ts`).
+
+- **Identificar** usa todos os quadros enviados pelo celular quando cabem, junto com as fotos do catálogo, numa única chamada (`identificationFrames`, até `VISION_MAX_IDENTIFY_FRAMES` e `VISION_MAX_IMAGES`). Com um catálogo grande, volta aos 5 quadros de visão geral e divide o catálogo em lotes.
+- **Contar** usa os 5 quadros de visão geral mais os vizinhos das evidências (`selectCountingFrames`, até `VISION_MAX_COUNT_FRAMES`). O modelo não informa um total: escolhe um quadro por SKU e desenha uma caixa por unidade física (`[x_min, y_min, x_max, y_max]` em 0–1000). O servidor conta as caixas e descarta as repetidas (IoU > 0,5). Quando o produto está em fileiras, o modelo informa frentes (vista frontal) e profundidade (vista lateral ou de cima, num segundo quadro). Se frentes × profundidade passar do número marcado, essa estimativa vira a sugestão, sempre com status *conferir*. Frames diferentes nunca são somados. Cobertura incompleta mantém a contagem visível, mas pede conferência; zero só vale com a área inteira visível.
+ Cada etapa roda numa invocação própria, em segundo plano, para caber no limite de tempo das Edge Functions. `pipeline_claim` impede análise duplicada. O provedor é qualquer API compatível com OpenAI Chat Completions, configurada por `VISION_*`, ou `mock`.
 
 ## Instrução padrão de contagem por loja
 

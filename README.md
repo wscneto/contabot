@@ -39,9 +39,13 @@ contabot/
 **Fluxo de uma contagem por vídeo**
 
 1. O funcionário filma (ou escolhe da galeria) e o app cria a captura (`start_capture`).
-2. **No celular** (`services/capture.ts`): o `expo-video` extrai ~1 quadro/s; cada quadro é reduzido a 640 px e pontuado (nitidez, exposição, movimento, reflexo, assinatura de similaridade). São escolhidos até 5 quadros de identificação e até 20 no total, incluindo vizinhos a ±2/4/6 s para a etapa de contagem.
-3. Só esses quadros (JPEG ≤ 1920 px) vão para o Storage. O vídeo não sai do aparelho.
-4. A Edge Function `analyze-capture` chama o modelo duas vezes, **identificar** e **contar**, valida a resposta com as mesmas regras do backend antigo e grava as sugestões. O app acompanha pelas etapas da captura.
+2. **No celular** (`services/capture.ts`): o `expo-video` extrai de 1 a 3 quadros/s (3/s em vídeos de até 20 s, 1/s em vídeos de 60 s, cerca de 60 candidatos); cada quadro é reduzido a 640 px e pontuado (nitidez, exposição, movimento, reflexo, assinatura de similaridade). São escolhidos 5 quadros de visão geral e até 20 no total, incluindo vizinhos a ±2/4/6 s.
+3. Só esses quadros (JPEG ≤ 1024 px) vão para o Storage. O vídeo não sai do aparelho.
+4. A Edge Function `analyze-capture` chama o modelo duas vezes:
+   - **identificar**: com todos os quadros enviados (até `VISION_MAX_IDENTIFY_FRAMES`) e as fotos do catálogo;
+   - **contar**: o modelo **marca uma caixa por unidade** num único quadro e, quando há fileiras, informa frentes × profundidade. O servidor conta as caixas (descartando marcações repetidas) e, se o arranjo indicar mais unidades, usa a estimativa e pede conferência.
+
+   As sugestões e as marcações são gravadas; na conferência, o funcionário vê as unidades numeradas sobre o quadro de evidência.
 5. Qualquer falha manda a contagem para conferência manual. Ela nunca fica presa em "analisando".
 
 ---

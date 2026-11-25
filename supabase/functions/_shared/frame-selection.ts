@@ -11,7 +11,7 @@
  * deduplica produtos físicos.
  */
 
-export const SELECTION_VERSION = 'device-temporal-v1';
+export const SELECTION_VERSION = 'device-temporal-v2';
 
 export const IMAGE_UPLOAD_SETTINGS = {
   /** Dimensão máxima dos quadros do vídeo enviados para análise da IA (px). */
@@ -347,6 +347,23 @@ export function computeQuality(
 // ---------------------------------------------------------------------------
 // Seleção
 // ---------------------------------------------------------------------------
+
+/**
+ * Quadros por segundo a examinar no celular. Vídeos curtos (uma prateleira)
+ * ganham 2–3 quadros/s, aumentando a chance de achar quadros nítidos em cada
+ * trecho; vídeos longos ficam em 1/s. O total fica perto de `targetCandidates`,
+ * que limita o tempo de processamento no aparelho.
+ */
+export function adaptiveSampleHz(
+  durationSeconds: number,
+  targetCandidates = 60,
+  minHz = 1,
+  maxHz = 3,
+): number {
+  if (!(durationSeconds > 0)) return minHz;
+  const hz = Math.floor((targetCandidates / durationSeconds) * 2) / 2; // passos de 0,5
+  return Math.max(minHz, Math.min(maxHz, hz));
+}
 
 /**
  * Instantes (s) dos candidatos: `sampleHz` por segundo, reduzido para caber em

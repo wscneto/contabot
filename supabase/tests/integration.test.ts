@@ -176,8 +176,23 @@ Deno.test({
     assertEquals(detail.capture.status, 'done');
     assertEquals(detail.capture.simulated, true);
     assert(detail.capture.frames.length >= 2);
-    const items = detail.items as { product_id: string; ai_status: string; ai_quantity: number | null }[];
+    const items = detail.items as {
+      product_id: string;
+      ai_status: string;
+      ai_quantity: number | null;
+      evidence_frame: string | null;
+      ai_marks: { frame: string; boxes: number[][]; marked: number; method: string } | null;
+    }[];
     assert(items.every((i) => i.ai_status !== 'manual'), JSON.stringify(items));
+    // Contagem por marcação: a quantidade é o número de caixas desenhadas no quadro de evidência.
+    const counted = items.filter((i) => i.ai_quantity !== null);
+    assert(counted.length > 0, JSON.stringify(items));
+    for (const item of counted) {
+      assert(item.ai_marks, `marcações gravadas: ${JSON.stringify(item)}`);
+      assertEquals(item.ai_marks.frame, item.evidence_frame);
+      assertEquals(item.ai_marks.boxes.length, item.ai_quantity);
+      assertEquals(item.ai_marks.method, 'marked');
+    }
 
     // Conferência e envio.
     const counts = Object.fromEntries(items.map((i) => [i.product_id, i.ai_quantity ?? 0]));

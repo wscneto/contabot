@@ -40,7 +40,7 @@ Não existe mais servidor próprio. O app fala direto com o Supabase, que concen
 | --- | --- | --- |
 | App | Expo SDK 58, Expo Router, TanStack Query e `supabase-js` | Uma base para Android e iPhone |
 | Captura | `expo-camera`, até 60 segundos | Roda no Expo Go |
-| Seleção de frames | No celular, com `expo-video` e `jpeg-js`; até 20 JPEG de até 1920 px | O vídeo nunca sobe, então o limite de 50 MB deixa de importar |
+| Seleção de frames | No celular, com `expo-video` e `jpeg-js`, 1 a 3 quadros/s; até 20 JPEG de até 1024 px | O vídeo nunca sobe, então o limite de 50 MB deixa de importar |
 | Regras de negócio | RPCs em SQL no Postgres | Sem servidor para hospedar e manter |
 | Análise | Edge Function `analyze-capture`, em Deno, uma invocação por etapa | Cabe no limite de tempo das Edge Functions |
 | Segurança | RLS por loja; nenhuma escrita direta nas tabelas | O banco bloqueia acesso cruzado |
