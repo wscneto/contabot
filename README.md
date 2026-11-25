@@ -43,7 +43,7 @@ contabot/
 3. Só esses quadros (JPEG ≤ 1024 px) vão para o Storage. O vídeo não sai do aparelho.
 4. A Edge Function `analyze-capture` chama o modelo duas vezes:
    - **identificar**: com todos os quadros enviados (até `VISION_MAX_IDENTIFY_FRAMES`) e as fotos do catálogo;
-   - **contar**: o modelo **marca uma caixa por unidade** num único quadro e, quando há fileiras, informa frentes × profundidade. O servidor conta as caixas (descartando marcações repetidas) e, se o arranjo indicar mais unidades, usa a estimativa e pede conferência.
+   - **contar**: o modelo **marca uma caixa por unidade** num único quadro, e o servidor conta as caixas, descartando marcações repetidas.
 
    As sugestões e as marcações são gravadas; na conferência, o funcionário vê as unidades numeradas sobre o quadro de evidência.
 5. Qualquer falha manda a contagem para conferência manual. Ela nunca fica presa em "analisando".

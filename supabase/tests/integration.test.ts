@@ -181,7 +181,7 @@ Deno.test({
       ai_status: string;
       ai_quantity: number | null;
       evidence_frame: string | null;
-      ai_marks: { frame: string; boxes: number[][]; marked: number; method: string } | null;
+      ai_marks: { frame: string; boxes: number[][]; marked: number; coords: string } | null;
     }[];
     assert(items.every((i) => i.ai_status !== 'manual'), JSON.stringify(items));
     // Contagem por marcação: a quantidade é o número de caixas desenhadas no quadro de evidência.
@@ -191,7 +191,7 @@ Deno.test({
       assert(item.ai_marks, `marcações gravadas: ${JSON.stringify(item)}`);
       assertEquals(item.ai_marks.frame, item.evidence_frame);
       assertEquals(item.ai_marks.boxes.length, item.ai_quantity);
-      assertEquals(item.ai_marks.method, 'marked');
+      assertEquals(item.ai_marks.coords, 'xyxy');
     }
 
     // Conferência e envio.

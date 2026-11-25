@@ -65,19 +65,10 @@ Para cada SKU enviado, retorne exatamente uma linha em counts:
    cuja embalagem dá para reconhecer. Nunca marque a mesma unidade duas vezes, nem
    desenhos impressos, reflexos, preços ou produtos de outros SKUs.
 3. Unidades vistas em outros frames NÃO entram em boxes: não some nem combine frames.
-   Os demais frames servem para confirmar identidade e para o arranjo do item 4.
-4. Arranjo (facings, depth, depth_frame_id): quando o produto estiver em fileiras com
-   unidades atrás das da frente, informe facings = número de frentes (colunas) do SKU
-   na vista frontal e depth = unidades em cada fileira, da frente para o fundo, contadas
-   num frame lateral ou de cima em que o fundo apareça (depth_frame_id). O servidor usa
-   facings × depth como estimativa sujeita a conferência. Só informe depth quando as
-   unidades de trás estiverem realmente visíveis; se as fileiras tiverem profundidades
-   diferentes, use a menor e explique em reason. Sem fileiras visíveis, ou com uma só
-   unidade de profundidade, use facings=null, depth=null e depth_frame_id=null.
-5. Se nenhum frame permitir distinguir unidades físicas do SKU: count_frame_id=null,
-   boxes=[], facings=null, depth=null, depth_frame_id=null, incomplete=true e
-   needs_review=true. Falta de visibilidade não é zero.
-6. boxes=[] com count_frame_id preenchido significa ZERO unidades: só quando a área inteira
+   Os demais frames servem para confirmar identidade.
+4. Se nenhum frame permitir distinguir unidades físicas do SKU: count_frame_id=null,
+   boxes=[], incomplete=true e needs_review=true. Falta de visibilidade não é zero.
+5. boxes=[] com count_frame_id preenchido significa ZERO unidades: só quando a área inteira
    estiver visível, coverage_complete=true e o SKU realmente não estiver na prateleira.
 coverage_complete=false quando os frames não mostram a área inteira da contagem.
 overlap_resolved=false quando não dá para saber se unidades de frames diferentes são as
@@ -86,8 +77,7 @@ contagem como parcial e pedirá conferência.
 incomplete=true quando houver unidades do SKU que não puderam ser marcadas (ocultas,
 cortadas ou fora do frame de contagem); incomplete exige needs_review=true.
 needs_review=true sempre que houver dúvida de identidade, oclusão ou reflexo relevante.
-reason: descreva em português o que marcou, onde, o arranjo observado e o que não pôde
-verificar. Não invente unidades ocultas.
+reason: descreva em português o que marcou, onde e o que não pôde verificar. Não invente unidades ocultas.
 Quando unknown_products puder afetar identificação, peça revisão com motivo.
 Se houver identification nos metadados, considere os motivos da etapa anterior.
 Para um SKU uncertain, só marque unidades quando evidências visuais distintivas resolverem

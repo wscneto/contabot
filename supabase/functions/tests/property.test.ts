@@ -105,9 +105,6 @@ const validCount = scenario.chain((s) =>
         fc.record({
           frame: fc.option(fc.constantFrom(...s.frameIds), { nil: null }),
           boxes: fc.array(box, { maxLength: 25 }),
-          facings: fc.option(fc.integer({ min: 0, max: 30 }), { nil: null }),
-          depth: fc.option(fc.integer({ min: 0, max: 30 }), { nil: null }),
-          depthFrame: fc.option(fc.constantFrom(...s.frameIds), { nil: null }),
           incomplete: fc.boolean(),
           needsReview: fc.boolean(),
           reason: fc.string({ maxLength: 40 }),
@@ -115,9 +112,6 @@ const validCount = scenario.chain((s) =>
           sku_id: sku,
           count_frame_id: r.frame,
           boxes: r.frame === null ? [] : r.boxes,
-          facings: r.facings,
-          depth: r.depth,
-          depth_frame_id: r.depthFrame,
           incomplete: r.incomplete,
           needs_review: r.needsReview,
           reason: r.reason,
@@ -216,17 +210,12 @@ Deno.test('propriedade: contagem que respeita o contrato é aceita e consolidada
         assertEquals(marks.marked, marks.boxes.length);
         assertEquals(marks.marked + marks.duplicates_removed, raw.boxes.length);
         assert(marks.boxes.length <= raw.boxes.length);
-        // A quantidade vem das caixas de UM frame ou da estimativa frentes × profundidade.
-        if (marks.method === 'marked') assertEquals(count.quantity, marks.marked);
-        else {
-          assertEquals(count.quantity, marks.facings! * marks.depth!);
-          assert(count.quantity > marks.marked);
-          assert(count.needs_review, 'estimativa pelo arranjo sempre pede conferência');
-        }
+        // A quantidade é o número de caixas de UM frame, nunca a soma de frames.
+        assertEquals(count.quantity, marks.marked);
+        assertEquals(count.evidence_frame_ids, [raw.count_frame_id]);
         if (count.quantity === 0) assert(!partial && !raw.incomplete, 'zero só com visão completa');
         if (partial) assert(count.incomplete && count.needs_review);
         if (count.incomplete) assert(count.needs_review);
-        assert(count.evidence_frame_ids.length >= 1 && count.evidence_frame_ids[0] === raw.count_frame_id);
       });
     }),
     RUNS,

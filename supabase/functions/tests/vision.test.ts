@@ -32,9 +32,6 @@ const suggestion = (boxes: Json[] = [[0, 0, 100, 100], [200, 0, 300, 100], [400,
     sku_id: 'sku-a',
     count_frame_id: 'frame-1',
     boxes,
-    facings: null,
-    depth: null,
-    depth_frame_id: null,
     incomplete: false,
     needs_review: false,
     reason: '',
@@ -46,7 +43,6 @@ Deno.test('o servidor conta as caixas marcadas no frame de contagem', () => {
   const count = validate(suggestion()).counts[0];
   assertEquals(count.quantity, 3);
   assertEquals(count.evidence_frame_ids, ['frame-1']);
-  assertEquals(count.marks?.method, 'marked');
   assertEquals(count.marks?.marked, 3);
   assertEquals([count.incomplete, count.needs_review], [false, false]);
 });
@@ -129,36 +125,6 @@ Deno.test('cobertura ou sobreposição pendente mantém a contagem visível, mas
   }
 });
 
-Deno.test('arranjo frentes × profundidade estima as unidades do fundo e sempre pede conferência', () => {
-  const payload = suggestion();
-  Object.assign(payload.counts[0], { facings: 3, depth: 4, depth_frame_id: 'frame-2' });
-  const count = validate(payload).counts[0];
-  assertEquals(count.quantity, 12);
-  assertEquals(count.marks?.method, 'layout');
-  assertEquals(count.marks?.marked, 3);
-  assertEquals(count.needs_review, true);
-  assertEquals(count.evidence_frame_ids, ['frame-1', 'frame-2']);
-});
-
-Deno.test('arranjo incompleto, raso ou menor que o marcado não altera a contagem', () => {
-  const cases: Json[] = [
-    { facings: 3, depth: 4, depth_frame_id: null }, // sem o frame em que a profundidade foi vista
-    { facings: null, depth: 4, depth_frame_id: 'frame-2' },
-    { facings: 3, depth: 1, depth_frame_id: 'frame-2' },
-    { facings: 1, depth: 2, depth_frame_id: 'frame-2' }, // 2 < 3 marcadas
-    { facings: 0, depth: 0, depth_frame_id: null }, // zero vale como "não informado"
-  ];
-  for (const layout of cases) {
-    const payload = suggestion();
-    Object.assign(payload.counts[0], layout);
-    const count = validate(payload).counts[0];
-    assertEquals([count.quantity, count.marks?.method, count.needs_review], [3, 'marked', false], JSON.stringify(layout));
-  }
-  const negative = suggestion();
-  negative.counts[0].depth = -2;
-  assertThrows(() => validate(negative), Error, 'depth');
-});
-
 Deno.test('campos extras, SKUs e frames desconhecidos falham fechado', () => {
   const extra = suggestion();
   extra.confidence = 0.9;
@@ -172,9 +138,9 @@ Deno.test('campos extras, SKUs e frames desconhecidos falham fechado', () => {
   const unknownFrame = suggestion();
   unknownFrame.counts[0].count_frame_id = 'frame-9';
   assertThrows(() => validate(unknownFrame), Error, 'não foi enviado');
-  const unknownDepthFrame = suggestion();
-  Object.assign(unknownDepthFrame.counts[0], { facings: 2, depth: 3, depth_frame_id: 'frame-9' });
-  assertThrows(() => validate(unknownDepthFrame), Error, 'não foi enviado');
+  const legacyLayout = suggestion();
+  Object.assign(legacyLayout.counts[0], { facings: 2, depth: 3, depth_frame_id: 'frame-2' });
+  assertThrows(() => validate(legacyLayout), Error, 'campos inesperados');
 });
 
 Deno.test('produtos fora do catálogo não invalidam a contagem', () => {
@@ -328,9 +294,6 @@ Deno.test('chat na contagem pede marcações e devolve a quantidade calculada pe
       sku_id: 'sku-a',
       count_frame_id: 'frame-2',
       boxes: [[0, 0, 100, 100], [150, 0, 250, 100]],
-      facings: null,
-      depth: null,
-      depth_frame_id: null,
       incomplete: false,
       needs_review: false,
       reason: 'Duas caixas na frente.',
@@ -359,9 +322,6 @@ Deno.test('chat com Gemini pede y primeiro e grava as caixas com x primeiro', as
       sku_id: 'sku-a',
       count_frame_id: 'frame-2',
       boxes: [[300, 120, 620, 260], [305, 270, 625, 410]],
-      facings: null,
-      depth: null,
-      depth_frame_id: null,
       incomplete: false,
       needs_review: false,
       reason: 'Duas caixas lado a lado.',
@@ -525,9 +485,6 @@ Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fic
     sku_id: sku,
     count_frame_id: 'f0001',
     boxes,
-    facings: null,
-    depth: null,
-    depth_frame_id: null,
     incomplete: false,
     needs_review: false,
     reason: '',
@@ -543,13 +500,12 @@ Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fic
       row('a', [0, 1, 2, 3, 4].map(box), { reason: 'nítido' }),
       row('b', [box(0), box(1)], { needs_review: true, reason: 'confira' }),
       row('c', [], { count_frame_id: null, incomplete: true, needs_review: true, reason: 'oculto' }),
-      row('e', [box(0), box(1)], { facings: 2, depth: 3, depth_frame_id: 'f0002', reason: 'fileiras' }),
     ],
-  }, 'cap', ['a', 'b', 'c', 'e'], ['f0001', 'f0002']);
+  }, 'cap', ['a', 'b', 'c'], ['f0001', 'f0002']);
   const items = countItems(skus, identification, result, frames);
   assertEquals(
     items.map((i) => [i.ai_status, i.counted]),
-    [['ok', 5], ['check', 2], ['missing', null], ['missing', null], ['check', 6]],
+    [['ok', 5], ['check', 2], ['missing', null], ['missing', null], ['missing', null]],
   );
   assertEquals(items[0].evidence_frame, 'loja/captures/cap/f0001.jpg');
   assertEquals(items[0].ai_note, '5 unidades marcadas na imagem. nítido');
@@ -558,9 +514,7 @@ Deno.test('itens: ok e check com sugestão já chegam preenchidos; ausência fic
   assertEquals(items[0].ai_marks?.boxes.length, 5);
   assertEquals(items[2].ai_marks, null);
   assertEquals(items[3].ai_note, 'motivo d');
-  assertEquals(items[4].ai_marks?.method, 'layout');
-  assertEquals(items[4].ai_marks?.depth_frame, 'loja/captures/cap/f0002.jpg');
-  assert(items[4].ai_note.startsWith('Estimativa pelo arranjo: 2 frentes × 3 de profundidade = 6; 2 unidades marcadas'));
+  assertEquals(items[1].ai_note, '2 unidades marcadas na imagem. confira');
   assertEquals(noMatchItems(skus, []).every((i) => i.ai_status === 'missing' && i.ai_marks === null), true);
 });
 
