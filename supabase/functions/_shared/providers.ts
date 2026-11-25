@@ -5,9 +5,11 @@
  * "mock" devolve respostas fixas para demonstração, sem reconhecer imagens.
  */
 
-import { COUNTING_INSTRUCTIONS, IDENTIFICATION_INSTRUCTIONS } from './prompts.ts';
+import { countingInstructions, IDENTIFICATION_INSTRUCTIONS } from './prompts.ts';
 import {
   type Box,
+  type BoxFormat,
+  boxFormatFor,
   type CountResult,
   type Identification,
   ProviderError,
@@ -134,6 +136,8 @@ export interface ChatProviderOptions {
   tokenLimitParam?: string;
   responseFormat?: ResponseFormat;
   imageDetail?: string;
+  /** Ordem das coordenadas das caixas; padrão pelo nome do modelo (Gemini = yxyx). */
+  boxFormat?: BoxFormat;
   extraParameters?: Record<string, unknown>;
   fetchImpl?: typeof fetch;
 }
@@ -194,6 +198,7 @@ export class ChatCompletionsProvider implements VisionProvider {
       tokenLimitParam: options.tokenLimitParam ?? 'max_tokens',
       responseFormat: options.responseFormat ?? 'json_schema',
       imageDetail: options.imageDetail ?? 'high',
+      boxFormat: options.boxFormat ?? boxFormatFor(this.model),
       extraParameters: extra,
       fetchImpl: options.fetchImpl ?? fetch,
     };
@@ -237,7 +242,8 @@ export class ChatCompletionsProvider implements VisionProvider {
         counts: [{
           sku_id: sampleSkuId,
           count_frame_id: video.primary_frame_id,
-          boxes: [[120, 300, 260, 620], [270, 305, 410, 625]],
+          // Duas unidades lado a lado, no formato de caixa pedido a este modelo.
+          boxes: exampleBoxes(this.options.boxFormat),
           facings: null,
           depth: null,
           depth_frame_id: null,
@@ -249,7 +255,7 @@ export class ChatCompletionsProvider implements VisionProvider {
       };
     // O esquema e um exemplo de instância preenchida vão sempre no texto: nem todo
     // provedor aplica response_format estrito, e sem exemplo alguns modelos ecoam o próprio schema.
-    const instructions = (stage === 'identify' ? IDENTIFICATION_INSTRUCTIONS : COUNTING_INSTRUCTIONS) +
+    const instructions = (stage === 'identify' ? IDENTIFICATION_INSTRUCTIONS : countingInstructions(this.options.boxFormat)) +
       `\n\nResponda exclusivamente com um objeto JSON válido preenchido com os dados reais da análise ` +
       `(NUNCA retorne a definição do esquema JSON como "type", "properties", "additionalProperties" ou "required").\n` +
       `Exemplo ilustrativo de formato (substitua pelos valores reais analisados):\n${JSON.stringify(example)}\n` +
@@ -363,7 +369,11 @@ export class ChatCompletionsProvider implements VisionProvider {
       }
 
       try {
-        const prediction = validateStage(stage, payload, video.id, skuIds, frameIds, { usage, requestId });
+        const prediction = validateStage(stage, payload, video.id, skuIds, frameIds, {
+          usage,
+          requestId,
+          boxFormat: this.options.boxFormat,
+        });
         return {
           prediction,
           usage,
@@ -397,6 +407,11 @@ export class ChatCompletionsProvider implements VisionProvider {
     }
     throw new ProviderError('A resposta do modelo viola o esquema ou as regras de contagem. Tente outra captura.');
   }
+}
+
+function exampleBoxes(format: BoxFormat): Box[] {
+  const xyxy: Box[] = [[120, 300, 260, 620], [270, 305, 410, 625]];
+  return format === 'yxyx' ? xyxy.map(([x0, y0, x1, y1]) => [y0, x0, y1, x1] as Box) : xyxy;
 }
 
 /** Aceita JSON puro, com bloco <think> antes, ou cercado por ```json. */
@@ -517,6 +532,7 @@ function positiveInt(env: (name: string) => string | undefined, name: string, fa
  *   VISION_MAX_OUTPUT_TOKENS (8000)  VISION_TIMEOUT_SECONDS (120)
  *   VISION_MAX_IMAGES (32)  VISION_MAX_IDENTIFY_FRAMES (20)  VISION_MAX_COUNT_FRAMES (10)
  *   VISION_IMAGE_DETAIL (high)  VISION_EXTRA_PARAMS (objeto JSON)
+ *   VISION_BOX_FORMAT        xyxy | yxyx (padrão: yxyx para Gemini, xyxy para os demais)
  *   VISION_MOCK_DELAY_MS (1500)
  */
 export function visionSettingsFromEnv(env: (name: string) => string | undefined): VisionSettings {
@@ -544,6 +560,10 @@ export function visionSettingsFromEnv(env: (name: string) => string | undefined)
       throw new ProviderError('VISION_EXTRA_PARAMS deve ser um objeto JSON.');
     }
   }
+  const boxFormatOverride = env('VISION_BOX_FORMAT')?.trim().toLowerCase() || undefined;
+  if (boxFormatOverride && boxFormatOverride !== 'xyxy' && boxFormatOverride !== 'yxyx') {
+    throw new ProviderError('VISION_BOX_FORMAT deve ser xyxy ou yxyx.');
+  }
   const responseFormat = (env('VISION_RESPONSE_FORMAT') || 'json_schema') as ResponseFormat;
   if (!['json_schema', 'json_object', 'none'].includes(responseFormat)) {
     throw new ProviderError('VISION_RESPONSE_FORMAT deve ser json_schema, json_object ou none.');
@@ -558,6 +578,7 @@ export function visionSettingsFromEnv(env: (name: string) => string | undefined)
     tokenLimitParam: env('VISION_TOKEN_LIMIT_PARAM') || 'max_tokens',
     responseFormat,
     imageDetail: env('VISION_IMAGE_DETAIL') || 'high',
+    boxFormat: boxFormatFor(env('VISION_MODEL') ?? '', boxFormatOverride),
     extraParameters,
   });
   return { provider, maxImages, maxIdentifyFrames, maxCountFrames };

@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1';
 import {
+  boxFormatFor,
   dedupeBoxes,
   iou,
   parseCountResult,
@@ -67,6 +68,29 @@ Deno.test('caixas fora da faixa ou invertidas são normalizadas; formatos invál
     assertThrows(() => validate(suggestion([box])), Error);
   }
   assertThrows(() => validate(suggestion(Array.from({ length: 301 }, () => [0, 0, 1, 1]))), Error, 'demais');
+});
+
+Deno.test('caixas do Gemini ([y_min, x_min, y_max, x_max]) são convertidas para x primeiro', () => {
+  // Fileira horizontal: duas caixas lado a lado, na mesma altura.
+  const gemini = suggestion([[300, 120, 620, 260], [305, 270, 625, 410]]);
+  const yxyx = parseCountResult(gemini, 'video-1', ['sku-a'], ['frame-1', 'frame-2'], 'yxyx').counts[0];
+  assertEquals(yxyx.marks?.boxes, [[120, 300, 260, 620], [270, 305, 410, 625]]);
+  assertEquals(yxyx.quantity, 2);
+  // Lido como xyxy, o mesmo par vira uma coluna vertical (o desenho transposto).
+  assertEquals(validate(gemini).counts[0].marks?.boxes, [[300, 120, 620, 260], [305, 270, 625, 410]]);
+  // Cantos invertidos continuam normalizados no formato yxyx.
+  const flipped = parseCountResult(suggestion([[620, 260, 300, 120]]), 'video-1', ['sku-a'], ['frame-1'], 'yxyx');
+  assertEquals(flipped.counts[0].marks?.boxes, [[120, 300, 260, 620]]);
+});
+
+Deno.test('formato das caixas segue o modelo e aceita sobreposição explícita', () => {
+  assertEquals(boxFormatFor('google/gemini-3.7-flash'), 'yxyx');
+  assertEquals(boxFormatFor('gemini-2.5-pro'), 'yxyx');
+  assertEquals(boxFormatFor('Qwen/Qwen3-VL-235B-A22B-Instruct'), 'xyxy');
+  assertEquals(boxFormatFor('gpt-5.6-luna'), 'xyxy');
+  assertEquals(boxFormatFor('google/gemini-3.7-flash', 'xyxy'), 'xyxy');
+  assertEquals(boxFormatFor('qwen', ' YXYX '), 'yxyx');
+  assertEquals(boxFormatFor('qwen', 'invalido'), 'xyxy');
 });
 
 Deno.test('um SKU repetido é rejeitado em vez de somado', () => {
@@ -324,6 +348,39 @@ Deno.test('chat na contagem pede marcações e devolve a quantidade calculada pe
   assert(!system.includes('"quantity"'), 'o modelo não informa total');
 });
 
+Deno.test('chat com Gemini pede y primeiro e grava as caixas com x primeiro', async () => {
+  const captured: Json[] = [];
+  const answer = {
+    video_id: 'video-1',
+    coverage_complete: true,
+    overlap_resolved: true,
+    unknown_products: [],
+    counts: [{
+      sku_id: 'sku-a',
+      count_frame_id: 'frame-2',
+      boxes: [[300, 120, 620, 260], [305, 270, 625, 410]],
+      facings: null,
+      depth: null,
+      depth_frame_id: null,
+      incomplete: false,
+      needs_review: false,
+      reason: 'Duas caixas lado a lado.',
+    }],
+  };
+  const gemini = chat(fakeFetch(answer, { captured }), { model: 'google/gemini-3.7-flash' });
+  const result = await gemini.count(video, catalog, frames);
+  assertEquals(result.prediction.counts[0].marks?.boxes, [[120, 300, 260, 620], [270, 305, 410, 625]]);
+  const system = captured[0].messages[0].content;
+  assert(system.includes('[y_min, x_min, y_max, x_max]'));
+  assert(!system.includes('[x_min, y_min, x_max, y_max]'));
+  assert(system.includes('[[300,120,620,260],[305,270,625,410]]'), 'exemplo no mesmo formato');
+
+  const forced = [] as Json[];
+  await chat(fakeFetch(answer, { captured: forced }), { model: 'google/gemini-3.7-flash', boxFormat: 'xyxy' })
+    .count(video, catalog, frames);
+  assert(forced[0].messages[0].content.includes('[x_min, y_min, x_max, y_max]'));
+});
+
 Deno.test('chat aceita cercas de markdown e remove <think>', () => {
   assertEquals(parseModelJson('<think>x</think>\n```json\n{"a":1}\n```'), { a: 1 });
   assertEquals(parseModelJson('não é json'), undefined);
@@ -383,6 +440,13 @@ Deno.test('configuração por ambiente: chat é o padrão e mock é explícito',
   const defaults = visionSettingsFromEnv(env({ VISION_PROVIDER: 'mock' }));
   assertEquals([defaults.maxImages, defaults.maxIdentifyFrames, defaults.maxCountFrames], [32, 20, 10]);
   assertEquals(visionSettingsFromEnv(env({ VISION_PROVIDER: 'mock', VISION_MAX_IDENTIFY_FRAMES: '8' })).maxIdentifyFrames, 8);
+  const chatEnv = {
+    VISION_API_URL: 'https://api.exemplo.com/v1/chat/completions',
+    VISION_MODEL: 'google/gemini-3.7-flash',
+    VISION_API_KEY: 'k',
+  };
+  visionSettingsFromEnv(env({ ...chatEnv, VISION_BOX_FORMAT: 'yxyx' }));
+  assertThrows(() => visionSettingsFromEnv(env({ ...chatEnv, VISION_BOX_FORMAT: 'xy' })), ProviderError, 'VISION_BOX_FORMAT');
 });
 
 Deno.test('mock é determinístico nas duas etapas', async () => {

@@ -28,6 +28,8 @@ export interface ItemMarks {
   frame: string;
   width: number | null;
   height: number | null;
+  /** Ordem das coordenadas gravadas (sempre x primeiro, já convertidas do formato do modelo). */
+  coords: 'xyxy';
   /** [x_min, y_min, x_max, y_max] em 0–1000. */
   boxes: Box[];
   marked: number;
@@ -244,6 +246,7 @@ export function countItems(
         frame: frame.path,
         width: frame.width ?? null,
         height: frame.height ?? null,
+        coords: 'xyxy',
         boxes: marks.boxes,
         marked: marks.marked,
         duplicates_removed: marks.duplicates_removed,
